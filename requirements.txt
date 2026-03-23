@@ -1,0 +1,48 @@
+# ── Core document ingestion ──────────────────────────────────────────
+unstructured-client
+unstructured[pdf,docx,pptx,xlsx,image]
+
+# ── Vector store ──────────────────────────────────────────────────────
+chromadb
+
+# ── Embeddings ────────────────────────────────────────────────────────
+sentence-transformers
+torch
+transformers
+
+# ── BM25 keyword search ───────────────────────────────────────────────
+rank-bm25
+
+# ── LLM client ───────────────────────────────────────────────────────
+groq
+
+# ── NLP utilities ────────────────────────────────────────────────────
+spacy
+langdetect
+lingua-language-detector
+
+# ── Context compression ───────────────────────────────────────────────
+llmlingua
+
+# ── Coreference resolution ────────────────────────────────────────────
+fastcoref
+
+# ── Config & validation ───────────────────────────────────────────────
+pydantic
+pydantic-settings
+python-dotenv
+
+# ── Utilities ────────────────────────────────────────────────────────
+numpy
+pandas
+tiktoken
+tenacity
+loguru
+rich
+tqdm
+httpx
+Pillow
+beautifulsoup4
+
+# ── Math parsing ─────────────────────────────────────────────────────
+latex2mathml

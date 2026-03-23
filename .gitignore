@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+envcf/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Local indexes, caches, and model artifacts
+chroma_db/
+bm25_index.pkl
+version_registry.json
+logs/
+.cache/
+hf_cache/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db

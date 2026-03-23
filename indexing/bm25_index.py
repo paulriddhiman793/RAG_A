@@ -1,0 +1,87 @@
+"""
+BM25 keyword search — complements vector search for:
+  - Exact term matching (model names, IDs, rare words)
+  - Cases where semantic similarity fails (specific numbers, codes)
+
+Built fresh from all stored chunks on startup, rebuilt after ingestion.
+"""
+from __future__ import annotations
+
+import pickle
+from pathlib import Path
+from typing import Any
+
+from rank_bm25 import BM25Okapi
+
+from utils.logger import logger
+
+
+_BM25_CACHE_PATH = Path("./bm25_index.pkl")
+
+
+class BM25Index:
+    def __init__(self):
+        self._bm25: BM25Okapi | None = None
+        self._chunks: list[dict[str, Any]] = []
+
+    def build(self, chunks: list[dict[str, Any]]) -> None:
+        """Build the BM25 index from a list of chunk dicts."""
+        self._chunks = chunks
+        corpus = [_tokenize(c.get("text", "")) for c in chunks]
+        self._bm25 = BM25Okapi(corpus)
+        logger.info(f"BM25 index built with {len(chunks)} documents")
+        self._save()
+
+    def search(self, query: str, top_k: int = 30) -> list[dict[str, Any]]:
+        """
+        Search BM25 index. Returns list of result dicts with 'score' key.
+        Scores are normalized to [0, 1].
+        """
+        if self._bm25 is None or not self._chunks:
+            logger.warning("BM25 index is empty — skipping keyword search")
+            return []
+
+        tokens = _tokenize(query)
+        raw_scores = self._bm25.get_scores(tokens)
+
+        # Normalize
+        max_score = max(raw_scores) if max(raw_scores) > 0 else 1.0
+        normalized = [s / max_score for s in raw_scores]
+
+        scored = [
+            {**self._chunks[i], "score": round(float(normalized[i]), 4)}
+            for i in range(len(self._chunks))
+            if normalized[i] > 0
+        ]
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
+
+    def save(self) -> None:
+        self._save()
+
+    def load(self) -> bool:
+        """Load a cached index from disk. Returns True on success."""
+        if not _BM25_CACHE_PATH.exists():
+            return False
+        try:
+            with open(_BM25_CACHE_PATH, "rb") as f:
+                data = pickle.load(f)
+            self._bm25 = data["bm25"]
+            self._chunks = data["chunks"]
+            logger.info(f"BM25 index loaded ({len(self._chunks)} docs)")
+            return True
+        except Exception as e:
+            logger.warning(f"BM25 load failed: {e}")
+            return False
+
+    def _save(self) -> None:
+        try:
+            with open(_BM25_CACHE_PATH, "wb") as f:
+                pickle.dump({"bm25": self._bm25, "chunks": self._chunks}, f)
+        except Exception as e:
+            logger.warning(f"BM25 save failed: {e}")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Simple whitespace + lowercase tokenizer."""
+    return text.lower().split()
