@@ -23,12 +23,9 @@ from ingestion.parsers import (
     parse_formula_batch,
     parse_table_batch,
     parse_figure_batch,
-    extract_with_nougat,
-    is_nougat_available,
 )
 from ingestion.chunking import chunk_elements, build_parent_child, Chunk
 from ingestion.versioning import stamp_chunks, get_deprecated_ids
-from config import settings
 from indexing.embeddings import embed_chunks, detect_domain
 from indexing.vector_store import VectorStore
 from indexing.bm25_index import BM25Index
@@ -61,42 +58,10 @@ def ingest_document(
     # ── Step 2: Attach figure captions ────────────────────────────────
     elements = attach_captions(elements)
 
-    # ── Step 3: Run Nougat for clean LaTeX + table extraction ────────────
+    # ── Step 3: Nougat disabled — using regex/HTML fallback parsers ──────
+    # To re-enable: set USE_NOUGAT=true in .env and pip install nougat-ocr
     nougat_data: dict | None = None
-    if is_nougat_available():
-        # Only run Nougat on pages that contain Formula or Table elements
-        # to avoid processing the entire PDF on slow CPU hardware.
-        formula_pages = sorted({
-            e.get("metadata", {}).get("page_number", 1)
-            for e in elements
-            if e.get("type") in ("Formula", "Table")
-        })
-        table_pages = sorted({
-            e.get("metadata", {}).get("page_number", 1)
-            for e in elements
-            if e.get("type") == "Table"
-        })
-        target_pages = sorted(set(formula_pages + table_pages))
-
-        if target_pages:
-            logger.info(
-                f"Nougat available — running on {len(target_pages)} pages "
-                f"containing equations/tables: {target_pages}"
-            )
-            nougat_data = extract_with_nougat(path, pages=target_pages)
-        else:
-            logger.info("No Formula/Table elements found — skipping Nougat")
-            nougat_data = None
-
-        if nougat_data:
-            n_eq = len(nougat_data.get("equations", []))
-            n_tb = len(nougat_data.get("tables", []))
-            logger.info(f"Nougat extracted {n_eq} equations, {n_tb} tables")
-        elif target_pages:
-            logger.warning("Nougat returned no data — using fallback parsers")
-    else:
-        logger.info("Nougat not installed — using regex/HTML fallback parsers")
-        logger.info("  To enable: pip install nougat-ocr")
+    logger.info("Nougat disabled — using regex + HTML parsers for math/tables")
 
     # ── Step 4: Parse special element types ───────────────────────────
     # Math — passes Nougat equations for accurate LaTeX matching
@@ -149,22 +114,8 @@ def ingest_document(
 
     # ── Step 7: Domain detection ──────────────────────────────────────
     sample_texts = [c.get("text", "") for c in chunks_dicts[:10]]
-    detected_domain = detect_domain(sample_texts)
-    if domain is not None:
-        embedding_domain = domain
-        logger.info(f"Embedding domain forced: {embedding_domain}")
-    elif settings.AUTO_DETECT_EMBEDDING_DOMAIN:
-        embedding_domain = detected_domain
-        logger.info(f"Embedding domain auto-selected: {embedding_domain}")
-    else:
-        embedding_domain = "general"
-        if detected_domain != "general":
-            logger.info(
-                "Domain-specific embedding auto-selection is disabled; "
-                f"detected '{detected_domain}' but using '{embedding_domain}' "
-                "for collection consistency"
-            )
-    logger.info(f"Detected domain: {detected_domain}")
+    detected_domain = domain or detect_domain(sample_texts)
+    logger.info(f"Domain: {detected_domain}")
 
     # ── Step 8: Version stamping ──────────────────────────────────────
     from ingestion.versioning import _file_hash
@@ -179,10 +130,10 @@ def ingest_document(
         vector_store.soft_delete_version(str(path), old_ver)
 
     # ── Step 10: Embed + upsert ───────────────────────────────────────
-    _, child_embeddings = embed_chunks(chunks_dicts, domain=embedding_domain)
+    _, child_embeddings = embed_chunks(chunks_dicts, domain=detected_domain)
     vector_store.add_chunks(chunks_dicts, child_embeddings)
 
-    _, parent_embeddings = embed_chunks(parent_dicts, domain=embedding_domain)
+    _, parent_embeddings = embed_chunks(parent_dicts, domain=detected_domain)
     vector_store.add_parent_chunks(parent_dicts, parent_embeddings)
 
     # ── Step 11: Rebuild BM25 ─────────────────────────────────────────
@@ -192,8 +143,7 @@ def ingest_document(
     summary = {
         "file": str(path),
         "status": "success",
-        "domain": embedding_domain,
-        "detected_domain": detected_domain,
+        "domain": detected_domain,
         "elements": len(enriched),
         "child_chunks": len(chunks_dicts),
         "parent_chunks": len(parent_dicts),
