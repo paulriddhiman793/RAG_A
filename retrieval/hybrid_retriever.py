@@ -39,6 +39,7 @@ def retrieve(
     vector_store: VectorStore,
     bm25_index: BM25Index,
     domain: str = "general",
+    rerank_query: str | None = None,
     top_k_final: int | None = None,
 ) -> tuple[list[dict[str, Any]], float]:
     """
@@ -74,30 +75,35 @@ def retrieve(
     # Stage 3 — RRF fusion across query variants
     fused = _reciprocal_rank_fusion(candidate_list)
 
-    # Stage 4 — Cross-encoder reranking (use primary query for scoring)
-    primary_query = queries[0] if queries else ""
+    # Stage 4 — Cross-encoder reranking
+    # Use the real user query when available; HyDE text is useful for retrieval
+    # expansion but often too generic for precise reranking.
+    primary_query = rerank_query or (queries[0] if queries else "")
     reranked = _rerank(primary_query, fused, top_k=top_k_final * 3)
 
-    # Stage 5 — Relevance threshold
+    # Stage 5 — Query-intent boost for structured chunks
+    reranked = _boost_for_query_intent(primary_query, reranked[:top_k_final * 2])
+
+    # Stage 6 — Relevance threshold
     if not reranked or reranked[0].get("score", 0.0) < settings.RELEVANCE_THRESHOLD:
         top_score = reranked[0].get("score", 0.0) if reranked else 0.0
         logger.info(f"Top score {top_score:.3f} below threshold {settings.RELEVANCE_THRESHOLD}")
         return [], top_score
 
-    # Stage 6 — Structured type boost
+    # Stage 7 — Structured type boost
     # Formula / Table / Image chunks carry structured data the LLM needs.
     # Boost their scores so they survive reranking even with weak NL descriptions.
     boosted_types = _boost_structured_types(reranked[:top_k_final * 2])
 
-    # Stage 7 — Recency boost
+    # Stage 8 — Recency boost
     boosted = apply_recency_boost(boosted_types)
 
-    # Stage 8 — Context ordering (best first + best last, middle = weakest)
+    # Stage 9 — Context ordering (best first + best last, middle = weakest)
     ordered = _order_for_context(boosted[:top_k_final])
 
     top_score = ordered[0].get("score", 0.0) if ordered else 0.0
 
-    # Stage 9 — Replace text child chunks with parent chunks for richer context
+    # Stage 10 — Replace text child chunks with parent chunks for richer context
     # Structured chunks (Formula/Table/Image) are passed through unchanged.
     expanded = _expand_to_parents(ordered, vector_store)
 
@@ -144,7 +150,7 @@ def _rerank(
 
     try:
         reranker = _load_reranker()
-        pairs = [(query, c.get("text", "")) for c in candidates]
+        pairs = [(query, _build_rerank_text(c)) for c in candidates]
         scores = reranker.predict(pairs, show_progress_bar=False)
 
         for i, item in enumerate(candidates):
@@ -156,6 +162,45 @@ def _rerank(
     except Exception as e:
         logger.warning(f"Cross-encoder reranking failed, using RRF order: {e}")
         return candidates[:top_k]
+
+
+def _build_rerank_text(candidate: dict[str, Any]) -> str:
+    meta = candidate.get("metadata", {})
+    el_type = meta.get("element_type", "")
+    text = candidate.get("text", "")
+
+    if el_type == "Formula":
+        parts = []
+        latex = meta.get("latex", "")
+        variables = meta.get("variables", [])
+        if latex:
+            parts.append(f"Equation: {latex}")
+        if variables:
+            parts.append(f"Variables: {', '.join(str(v) for v in variables[:12])}")
+        if text:
+            parts.append(f"Description: {text}")
+        return "\n".join(parts) if parts else text
+
+    if el_type == "Table":
+        table_json = meta.get("table_json", {})
+        headers = table_json.get("headers", [])
+        rows = table_json.get("rows", [])
+        parts = []
+        if headers:
+            parts.append(f"Headers: {headers}")
+        if rows:
+            parts.append(f"Rows: {rows[:3]}")
+        if text:
+            parts.append(f"Summary: {text}")
+        return "\n".join(parts) if parts else text
+
+    if el_type == "Image":
+        alt_text = meta.get("alt_text", "")
+        caption = meta.get("caption", "")
+        parts = [p for p in [alt_text, caption, text] if p]
+        return "\n".join(parts) if parts else text
+
+    return text
 
 
 # Chunk types that carry structured data — never replace with parent text
@@ -180,6 +225,29 @@ def _boost_structured_types(
         el_type = chunk.get("metadata", {}).get("element_type", "")
         if el_type in _STRUCTURED_TYPES:
             chunk["score"] = min(1.0, chunk.get("score", 0.0) + boost)
+    return sorted(chunks, key=lambda x: x.get("score", 0.0), reverse=True)
+
+
+def _boost_for_query_intent(query: str, chunks: list[dict]) -> list[dict]:
+    q = (query or "").lower()
+    if not q:
+        return chunks
+
+    wants_formula = any(term in q for term in [
+        "equation", "equations", "formula", "formulas", "latex", "loss function"
+    ])
+    wants_table = any(term in q for term in [
+        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse", "r-squared"
+    ])
+
+    for chunk in chunks:
+        el_type = chunk.get("metadata", {}).get("element_type", "")
+        score = chunk.get("score", 0.0)
+        if wants_formula and el_type == "Formula":
+            chunk["score"] = min(1.0, score + 0.35)
+        elif wants_table and el_type == "Table":
+            chunk["score"] = min(1.0, score + 0.30)
+
     return sorted(chunks, key=lambda x: x.get("score", 0.0), reverse=True)
 
 

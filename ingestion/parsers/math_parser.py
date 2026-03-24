@@ -26,19 +26,25 @@ def parse_formula(
     latex, source = _get_latex(raw_text, page, nougat_equations)
     variables = _extract_variables(latex or raw_text)
     nl = _generate_nl_description(latex or raw_text, raw_text, llm_client)
-    embed_text = f"equation formula: {nl}"
+    embed_text = (
+        f"equation formula raw: {raw_text} "
+        f"latex: {latex} "
+        f"description: {nl}"
+    ).strip()
 
     return {
         **element,
         "latex": latex,
+        "raw_formula_text": raw_text,
         "nl_description": nl,
         "variables": variables,
         "source": source,
         "embed_text": embed_text,
-        "context_text": _format_for_context(latex, nl, element),
+        "context_text": _format_for_context(latex, raw_text, nl, element),
         "metadata": {
             **element.get("metadata", {}),
             "latex": latex,
+            "raw_formula_text": raw_text,
             "nl_description": nl,
             "variables": variables,
             "nougat_source": source == "nougat",
@@ -116,7 +122,7 @@ def _extract_latex_regex(text: str) -> str:
 
 
 def _generate_nl_description(latex, raw_text, llm_client=None):
-    if llm_client is None:
+    if llm_client is None or _looks_corrupted_formula(latex, raw_text):
         return _rule_based_description(latex or raw_text)
     prompt = (
         "Describe this mathematical equation in 1-2 plain-English sentences "
@@ -150,6 +156,26 @@ def _rule_based_description(text: str) -> str:
     return f"Mathematical formula: {text[:100]}"
 
 
+def _looks_corrupted_formula(latex: str, raw_text: str) -> bool:
+    text = (latex or raw_text or "").strip()
+    if not text:
+        return True
+
+    math_markers = sum(text.count(ch) for ch in "=+-/*^_\\()[]{}")
+    letters = sum(ch.isalpha() for ch in text)
+    digits = sum(ch.isdigit() for ch in text)
+    weird_words = re.findall(r"[A-Za-z]{5,}", text)
+    suspicious_tokens = {"lyse", "lewstom", "lyag", "lyee", "las", "lz"}
+
+    if any(tok.lower() in suspicious_tokens for tok in weird_words):
+        return True
+    if math_markers == 0 and digits > 0:
+        return True
+    if letters > 0 and math_markers <= 1 and len(weird_words) >= 2:
+        return True
+    return False
+
+
 _VARIABLE_PATTERN = re.compile(
     r"(?<![a-zA-Z])([A-Za-z](?:_\{[^}]+\}|_[a-zA-Z0-9])?)(?![a-zA-Z])"
 )
@@ -167,12 +193,16 @@ def _extract_variables(text: str) -> list[str]:
     return list({v for v in candidates if v.lower() not in _COMMON_OPERATORS})
 
 
-def _format_for_context(latex: str, nl: str, element: dict) -> str:
+def _format_for_context(latex: str, raw_text: str, nl: str, element: dict) -> str:
     page = element.get("metadata", {}).get("page_number", "?")
     section = element.get("metadata", {}).get("section", "")
     lines = [f"[Equation — Page {page}{f' | {section}' if section else ''}]"]
     if latex:
         lines.append(f"LaTeX: ${latex}$")
+    if raw_text and raw_text != latex:
+        lines.append(f"Raw extracted text: {raw_text}")
+    if _looks_corrupted_formula(latex, raw_text):
+        lines.append("Extraction quality note: this equation text appears OCR-corrupted.")
     lines.append(f"Description: {nl}")
     return "\n".join(lines)
 

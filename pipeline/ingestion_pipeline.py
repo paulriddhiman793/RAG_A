@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from config import settings
 from ingestion.document_loader import load_document
 from ingestion.parsers import (
     attach_captions,
@@ -114,8 +115,22 @@ def ingest_document(
 
     # ── Step 7: Domain detection ──────────────────────────────────────
     sample_texts = [c.get("text", "") for c in chunks_dicts[:10]]
-    detected_domain = domain or detect_domain(sample_texts)
-    logger.info(f"Domain: {detected_domain}")
+    detected_domain = detect_domain(sample_texts)
+    if domain is not None:
+        embedding_domain = domain
+        logger.info(f"Embedding domain forced: {embedding_domain}")
+    elif settings.AUTO_DETECT_EMBEDDING_DOMAIN:
+        embedding_domain = detected_domain
+        logger.info(f"Embedding domain auto-selected: {embedding_domain}")
+    else:
+        embedding_domain = "general"
+        if detected_domain != "general":
+            logger.info(
+                "Domain-specific embedding auto-selection is disabled; "
+                f"detected '{detected_domain}' but using '{embedding_domain}' "
+                "for collection consistency"
+            )
+    logger.info(f"Detected domain: {detected_domain}")
 
     # ── Step 8: Version stamping ──────────────────────────────────────
     from ingestion.versioning import _file_hash
@@ -130,10 +145,10 @@ def ingest_document(
         vector_store.soft_delete_version(str(path), old_ver)
 
     # ── Step 10: Embed + upsert ───────────────────────────────────────
-    _, child_embeddings = embed_chunks(chunks_dicts, domain=detected_domain)
+    _, child_embeddings = embed_chunks(chunks_dicts, domain=embedding_domain)
     vector_store.add_chunks(chunks_dicts, child_embeddings)
 
-    _, parent_embeddings = embed_chunks(parent_dicts, domain=detected_domain)
+    _, parent_embeddings = embed_chunks(parent_dicts, domain=embedding_domain)
     vector_store.add_parent_chunks(parent_dicts, parent_embeddings)
 
     # ── Step 11: Rebuild BM25 ─────────────────────────────────────────
@@ -143,7 +158,8 @@ def ingest_document(
     summary = {
         "file": str(path),
         "status": "success",
-        "domain": detected_domain,
+        "domain": embedding_domain,
+        "detected_domain": detected_domain,
         "elements": len(enriched),
         "child_chunks": len(chunks_dicts),
         "parent_chunks": len(parent_dicts),

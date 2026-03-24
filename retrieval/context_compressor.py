@@ -96,8 +96,11 @@ def _reconstruct_body(chunk: dict, el_type: str, meta: dict) -> str:
 
     if el_type == "Formula":
         latex = meta.get("latex", "").strip()
+        raw_formula_text = meta.get("raw_formula_text", "").strip()
         if latex:
             lines = [f"LaTeX equation: ${latex}$"]
+            if raw_formula_text and raw_formula_text != latex:
+                lines.append(f"Raw extracted text: {raw_formula_text}")
             # Also include the NL description for context
             if plain_text and plain_text != latex:
                 lines.append(f"Description: {plain_text}")
@@ -107,23 +110,30 @@ def _reconstruct_body(chunk: dict, el_type: str, meta: dict) -> str:
     if el_type == "Table":
         import json as _json
         caption = meta.get("caption", "")
+        table_json = meta.get("table_json")
         table_json_str = meta.get("table_json_str", "")
         lines = []
         if caption:
             lines.append(f"Caption: {caption}")
-        if table_json_str:
+        if table_json is None and table_json_str:
             try:
                 table_json = _json.loads(table_json_str)
-                headers = table_json.get("headers", [])
-                rows = table_json.get("rows", [])
-                if headers:
-                    lines.append(f"Headers: {headers}")
-                if rows:
-                    lines.append("Data:")
-                    for row in rows:
-                        lines.append(f"  {row}")
             except Exception:
+                table_json = None
                 lines.append(table_json_str)
+        if table_json:
+            headers = [_clean_table_cell(h) for h in table_json.get("headers", [])]
+            rows = table_json.get("rows", [])
+            if headers:
+                lines.append(f"Headers: {headers}")
+            if rows:
+                lines.append("Data:")
+                for row in rows:
+                    cleaned_row = {
+                        _clean_table_cell(k): _clean_table_cell(v)
+                        for k, v in row.items()
+                    }
+                    lines.append(f"  {cleaned_row}")
         if not lines:
             return plain_text
         return "\n".join(lines)
@@ -140,6 +150,12 @@ def _reconstruct_body(chunk: dict, el_type: str, meta: dict) -> str:
 
     # NarrativeText, Title, ListItem, ParentChunk, CodeSnippet, etc.
     return plain_text
+
+
+def _clean_table_cell(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.replace("\n", " ").strip().strip("|").strip()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

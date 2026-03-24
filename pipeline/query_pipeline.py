@@ -90,6 +90,7 @@ def query(
         vector_store=vector_store,
         bm25_index=bm25_index,
         domain=domain,
+        rerank_query=user_query,
     )
 
     if verbose:

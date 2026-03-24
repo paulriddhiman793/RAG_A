@@ -29,6 +29,7 @@ METADATA_KEYS = (
     "language",
     # Type-specific (serialized as JSON strings)
     "latex",
+    "raw_formula_text",
     "variables_json",
     "table_json_str",
     "caption",
@@ -62,6 +63,7 @@ def build_metadata(chunk: dict[str, Any]) -> dict[str, Any]:
         "language":       str(raw_meta.get("language", "en")),
         # Type-specific
         "latex":          str(raw_meta.get("latex", "")),
+        "raw_formula_text": str(raw_meta.get("raw_formula_text", "")),
         "variables_json": json.dumps(raw_meta.get("variables", [])),
         "table_json_str": json.dumps(raw_meta.get("table_json", {})),
         "caption":        str(raw_meta.get("caption", "")),

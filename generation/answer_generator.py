@@ -28,8 +28,10 @@ Rules you MUST follow:
    "I cannot find this information in the provided documents."
 5. Do NOT use your general knowledge to fill gaps — only the sources.
 6. For mathematical equations, reproduce the LaTeX exactly as shown in the source.
-7. For tables, summarise the data and cite the source — do not reproduce large tables.
-8. Never fabricate citations or claim a source says something it does not.
+7. If an equation or OCR text looks corrupted, garbled, or unreadable, say that explicitly and do not infer a cleaner equation.
+8. When asked to list equations, include only equations explicitly present in Formula sources, not narrative mentions of models or physics.
+9. For tables, summarise the data and cite the source — do not reproduce large tables.
+10. Never fabricate citations or claim a source says something it does not.
 """
 
 NO_ANSWER_RESPONSE = (
