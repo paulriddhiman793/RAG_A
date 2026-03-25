@@ -5,6 +5,7 @@ citation-grounded, verified response.
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import re
 from typing import Any
 
@@ -320,6 +321,16 @@ def _maybe_answer_figure_query(
         )
     )
 
+    requested_nums = _extract_requested_figure_numbers(query)
+    if len(requested_nums) >= 2:
+        targets = []
+        for num in requested_nums[:2]:
+            target = _select_figure_entry(num, figure_entries)
+            if target is not None:
+                targets.append((num, target))
+        if len(targets) == 2:
+            return _compare_requested_figures(query, targets, chunks, llm_client)
+
     if requested_num is not None:
         target = _select_figure_entry(requested_num, figure_entries)
         if target is not None:
@@ -443,6 +454,18 @@ def _extract_requested_figure_number(text: str) -> int | None:
         return None
 
 
+def _extract_requested_figure_numbers(text: str) -> list[int]:
+    found = []
+    for match in _FIGURE_LABEL_RE.finditer(text or ""):
+        try:
+            num = int(match.group(1))
+        except Exception:
+            continue
+        if num not in found:
+            found.append(num)
+    return found
+
+
 def _select_figure_entry(requested_num: int, figure_entries: list[dict[str, Any]]) -> dict[str, Any] | None:
     exact = [e for e in figure_entries if e.get("label_num") == requested_num]
     if exact:
@@ -479,6 +502,65 @@ def _collect_supporting_figure_chunks(
     return collected[:4]
 
 
+def _compare_requested_figures(
+    query: str,
+    targets: list[tuple[int, dict[str, Any]]],
+    chunks: list[dict[str, Any]],
+    llm_client: LLMClient | None,
+) -> str:
+    (left_num, left), (right_num, right) = targets
+    left_ref = f"[Source {left['source_num']}]"
+    right_ref = f"[Source {right['source_num']}]"
+
+    support_lines = []
+    for requested_num, target in targets:
+        for chunk in _collect_supporting_figure_chunks(requested_num, target, chunks):
+            if chunk["source_num"] == target["source_num"]:
+                continue
+            support_lines.append(f"[Source {chunk['source_num']}] {chunk['text']}")
+    support_lines = list(dict.fromkeys(support_lines))
+    support_summary = "\n".join(support_lines[:6])
+
+    left_image = left.get("image_base64") or _render_page_image(left.get("source_file", ""), left.get("page"))
+    right_image = right.get("image_base64") or _render_page_image(right.get("source_file", ""), right.get("page"))
+    composite = _compose_images_side_by_side([left_image, right_image]) if left_image and right_image else ""
+
+    if llm_client is not None and composite:
+        prompt = (
+            "Compare the two scientific figures shown in the combined image.\n"
+            f"Left image is Figure {left_num} from {left_ref}.\n"
+            f"Left caption: {left.get('caption') or left.get('alt_text') or f'Figure {left_num}'}\n"
+            f"Right image is Figure {right_num} from {right_ref}.\n"
+            f"Right caption: {right.get('caption') or right.get('alt_text') or f'Figure {right_num}'}\n\n"
+            f"Supporting text:\n{support_summary or 'None'}\n\n"
+            "Answer the user query directly. If the figures are not the same, clearly state the main differences. "
+            "Use only the provided evidence and the composite image. Cite every factual claim with [Source N]."
+        )
+        try:
+            return llm_client.complete_vision(
+                text=prompt,
+                image_base64=composite,
+                image_mime_type="image/png",
+                max_tokens=settings_max_tokens(),
+            ).strip()
+        except Exception as e:
+            logger.warning(f"Figure-comparison vision explanation failed: {e}")
+
+    left_caption = left.get("caption") or left.get("alt_text") or f"Figure {left_num}"
+    right_caption = right.get("caption") or right.get("alt_text") or f"Figure {right_num}"
+    if "same" in (query or "").lower():
+        return (
+            f"Figure {left_num} and Figure {right_num} are not the same. "
+            f"Figure {left_num} is described as {left_caption.lower()} {left_ref}, while "
+            f"Figure {right_num} is described as {right_caption.lower()} {right_ref}."
+        )
+    return (
+        f"Figure {left_num} and Figure {right_num} are different. "
+        f"Figure {left_num} is described as {left_caption.lower()} {left_ref}, while "
+        f"Figure {right_num} is described as {right_caption.lower()} {right_ref}."
+    )
+
+
 def _looks_table_like_visual(caption: str, alt_text: str, text: str) -> bool:
     sample = " ".join([caption, alt_text, text]).strip().lower()
     return sample.startswith("table ") or sample.startswith("table:") or "table 2" in sample[:40]
@@ -504,6 +586,42 @@ def _render_page_image(source_file: str, page_number: Any) -> str:
         return base64.b64encode(pix.tobytes("png")).decode("ascii")
     except Exception as e:
         logger.warning(f"Figure page render fallback failed: {e}")
+        return ""
+
+
+def _compose_images_side_by_side(images_b64: list[str]) -> str:
+    try:
+        from PIL import Image
+    except Exception:
+        return ""
+
+    try:
+        images = [
+            Image.open(BytesIO(base64.b64decode(img))).convert("RGB")
+            for img in images_b64
+            if img
+        ]
+        if not images:
+            return ""
+        height = max(img.height for img in images)
+        resized = []
+        for img in images:
+            if img.height == height:
+                resized.append(img)
+                continue
+            width = max(1, int(img.width * (height / img.height)))
+            resized.append(img.resize((width, height)))
+        total_width = sum(img.width for img in resized)
+        canvas = Image.new("RGB", (total_width, height), color="white")
+        x = 0
+        for img in resized:
+            canvas.paste(img, (x, 0))
+            x += img.width
+        buffer = BytesIO()
+        canvas.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Figure composite render failed: {e}")
         return ""
 
 
