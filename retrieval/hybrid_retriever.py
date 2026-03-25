@@ -54,15 +54,37 @@ def retrieve(
 
     # Stage 1 & 2 — gather candidates from all query variants
     candidates: dict[str, dict] = {}
+    formula_intent = _has_formula_intent(rerank_query or (queries[0] if queries else ""))
+    table_intent = _has_table_intent(rerank_query or (queries[0] if queries else ""))
     for query in queries:
         q_emb = embed_query(query, domain=domain)
 
         vec_results = vector_store.query(q_emb, top_k=settings.VECTOR_SEARCH_TOP_K)
         bm25_results = bm25_index.search(query, top_k=settings.BM25_TOP_K)
+        focused_results: list[dict[str, Any]] = []
+        if formula_intent:
+            focused_results.extend(
+                vector_store.query(
+                    q_emb,
+                    top_k=min(10, settings.VECTOR_SEARCH_TOP_K),
+                    where={"element_type": {"$eq": "Formula"}},
+                )
+            )
+        if table_intent:
+            focused_results.extend(
+                vector_store.query(
+                    q_emb,
+                    top_k=min(10, settings.VECTOR_SEARCH_TOP_K),
+                    where={"element_type": {"$eq": "Table"}},
+                )
+            )
 
-        for r in vec_results + bm25_results:
+        for r in vec_results + bm25_results + focused_results:
             cid = r["chunk_id"]
             if cid not in candidates or r["score"] > candidates[cid]["score"]:
+                if r in focused_results:
+                    r = dict(r)
+                    r["score"] = min(1.0, r.get("score", 0.0) + 0.1)
                 candidates[cid] = r
 
     if not candidates:
@@ -233,12 +255,8 @@ def _boost_for_query_intent(query: str, chunks: list[dict]) -> list[dict]:
     if not q:
         return chunks
 
-    wants_formula = any(term in q for term in [
-        "equation", "equations", "formula", "formulas", "latex", "loss function"
-    ])
-    wants_table = any(term in q for term in [
-        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse", "r-squared"
-    ])
+    wants_formula = _has_formula_intent(q)
+    wants_table = _has_table_intent(q)
 
     for chunk in chunks:
         el_type = chunk.get("metadata", {}).get("element_type", "")
@@ -249,6 +267,20 @@ def _boost_for_query_intent(query: str, chunks: list[dict]) -> list[dict]:
             chunk["score"] = min(1.0, score + 0.30)
 
     return sorted(chunks, key=lambda x: x.get("score", 0.0), reverse=True)
+
+
+def _has_formula_intent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "equation", "equations", "formula", "formulas", "latex", "loss function"
+    ])
+
+
+def _has_table_intent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse", "r-squared"
+    ])
 
 
 def _order_for_context(chunks: list[dict]) -> list[dict]:

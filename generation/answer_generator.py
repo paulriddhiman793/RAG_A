@@ -83,7 +83,11 @@ def generate_answer(
     )
 
     # Generate — optionally include images for multimodal chunks
-    image_chunks = _extract_image_chunks(chunks) if include_images else []
+    image_chunks = (
+        _extract_image_chunks(chunks)
+        if include_images and _should_include_images(query)
+        else []
+    )
 
     try:
         if image_chunks:
@@ -143,6 +147,13 @@ def _extract_image_chunks(chunks: list[dict]) -> list[dict]:
         if c.get("metadata", {}).get("image_base64")
         or c.get("metadata", {}).get("element_type") == "Image"
     ]
+
+
+def _should_include_images(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+    ])
 
 
 def _generate_with_images(
