@@ -56,6 +56,7 @@ def retrieve(
     candidates: dict[str, dict] = {}
     formula_intent = _has_formula_intent(rerank_query or (queries[0] if queries else ""))
     table_intent = _has_table_intent(rerank_query or (queries[0] if queries else ""))
+    figure_intent = _has_figure_intent(rerank_query or (queries[0] if queries else ""))
     for query in queries:
         q_emb = embed_query(query, domain=domain)
 
@@ -76,6 +77,14 @@ def retrieve(
                     q_emb,
                     top_k=min(10, settings.VECTOR_SEARCH_TOP_K),
                     where={"element_type": {"$eq": "Table"}},
+                )
+            )
+        if figure_intent:
+            focused_results.extend(
+                vector_store.query(
+                    q_emb,
+                    top_k=min(10, settings.VECTOR_SEARCH_TOP_K),
+                    where={"element_type": {"$eq": "Image"}},
                 )
             )
 
@@ -104,7 +113,8 @@ def retrieve(
     reranked = _rerank(primary_query, fused, top_k=top_k_final * 3)
 
     # Stage 5 — Query-intent boost for structured chunks
-    reranked = _boost_for_query_intent(primary_query, reranked[:top_k_final * 2])
+    reranked = _boost_for_query_intent(primary_query, reranked)
+    reranked = _ensure_query_type_presence(primary_query, reranked, window=top_k_final * 2)
 
     # Stage 6 — Relevance threshold
     if not reranked or reranked[0].get("score", 0.0) < settings.RELEVANCE_THRESHOLD:
@@ -257,6 +267,7 @@ def _boost_for_query_intent(query: str, chunks: list[dict]) -> list[dict]:
 
     wants_formula = _has_formula_intent(q)
     wants_table = _has_table_intent(q)
+    wants_figure = _has_figure_intent(q)
 
     for chunk in chunks:
         el_type = chunk.get("metadata", {}).get("element_type", "")
@@ -265,8 +276,55 @@ def _boost_for_query_intent(query: str, chunks: list[dict]) -> list[dict]:
             chunk["score"] = min(1.0, score + 0.35)
         elif wants_table and el_type == "Table":
             chunk["score"] = min(1.0, score + 0.30)
+        elif wants_figure and el_type == "Image":
+            chunk["score"] = min(1.0, score + 0.30)
 
     return sorted(chunks, key=lambda x: x.get("score", 0.0), reverse=True)
+
+
+def _ensure_query_type_presence(query: str, chunks: list[dict], window: int) -> list[dict]:
+    desired_type = ""
+    min_count = 0
+    q = (query or "").lower()
+
+    if _has_formula_intent(q):
+        desired_type = "Formula"
+        min_count = 2 if "equations" in q else 1
+    elif _has_table_intent(q):
+        desired_type = "Table"
+        min_count = 1
+    elif _has_figure_intent(q):
+        desired_type = "Image"
+        min_count = 2 if any(term in q for term in ["how many", "count", "all figures", "figures"]) else 1
+
+    if not desired_type or not chunks:
+        return chunks
+
+    head = list(chunks[:window])
+    head_ids = {c["chunk_id"] for c in head}
+    current = sum(1 for c in head if c.get("metadata", {}).get("element_type") == desired_type)
+    if current >= min_count:
+        return chunks
+
+    promoted: list[dict] = []
+    for candidate in chunks[window:]:
+        if candidate.get("metadata", {}).get("element_type") != desired_type:
+            continue
+        copy = dict(candidate)
+        copy["score"] = min(1.0, copy.get("score", 0.0) + 0.45)
+        promoted.append(copy)
+        head_ids.add(copy["chunk_id"])
+        current += 1
+        if current >= min_count:
+            break
+
+    if not promoted:
+        return chunks
+
+    head.extend(promoted)
+    head = sorted(head, key=lambda x: x.get("score", 0.0), reverse=True)
+    tail = [c for c in chunks if c["chunk_id"] not in head_ids]
+    return head + tail
 
 
 def _has_formula_intent(query: str) -> bool:
@@ -280,6 +338,13 @@ def _has_table_intent(query: str) -> bool:
     q = (query or "").lower()
     return any(term in q for term in [
         "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse", "r-squared"
+    ])
+
+
+def _has_figure_intent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
     ])
 
 

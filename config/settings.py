@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     #   mixtral-8x7b-32768          ← long context window
     #   gemma2-9b-it                ← lightweight
     LLM_MODEL: str = "llama-3.3-70b-versatile"
+    VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     MAX_TOKENS: int = 2048
 
     # ── Vector Store ─────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ class Settings(BaseSettings):
     # ── Embedding Model ───────────────────────────────────────────────────
     DEFAULT_EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
     AUTO_DETECT_EMBEDDING_DOMAIN: bool = False
+    USE_NOUGAT: bool = False
+    USE_FORMULA_VISION_FALLBACK: bool = True
 
     # ── Retrieval ─────────────────────────────────────────────────────────
     VECTOR_SEARCH_TOP_K: int = 30

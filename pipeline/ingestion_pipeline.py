@@ -1,16 +1,5 @@
 """
-Ingestion pipeline — end-to-end document processing:
-
-  1. Load document via Unstructured.io API
-  2. Attach captions to figures
-  3. Parse special elements (math, tables, figures)
-  4. Resolve coreferences in text chunks
-  5. Chunk with overlap + parent-child hierarchy
-  6. Stamp with version/timestamp metadata
-  7. Detect domain for embedding model selection
-  8. Embed all chunks
-  9. Soft-delete old version in vector store
- 10. Upsert new chunks into vector store + BM25
+Ingestion pipeline - end-to-end document processing.
 """
 from __future__ import annotations
 
@@ -18,19 +7,20 @@ from pathlib import Path
 from typing import Any
 
 from config import settings
+from generation.llm_client import LLMClient
+from indexing.bm25_index import BM25Index
+from indexing.embeddings import detect_domain, embed_chunks
+from indexing.vector_store import VectorStore
+from ingestion.chunking import Chunk, build_parent_child, chunk_elements
 from ingestion.document_loader import load_document
 from ingestion.parsers import (
     attach_captions,
+    parse_figure_batch,
     parse_formula_batch,
     parse_table_batch,
-    parse_figure_batch,
 )
-from ingestion.chunking import chunk_elements, build_parent_child, Chunk
-from ingestion.versioning import stamp_chunks, get_deprecated_ids
-from indexing.embeddings import embed_chunks, detect_domain
-from indexing.vector_store import VectorStore
-from indexing.bm25_index import BM25Index
-from generation.llm_client import LLMClient
+from ingestion.parsers.nougat_processor import extract_with_nougat, is_nougat_available
+from ingestion.versioning import get_deprecated_ids, stamp_chunks
 from utils.language_detector import detect_language
 from utils.logger import logger
 
@@ -50,40 +40,72 @@ def ingest_document(
     path = Path(file_path)
     logger.info(f"=== Ingesting: {path.name} ===")
 
-    # ── Step 1: Load via Unstructured API ─────────────────────────────
     elements = load_document(path)
     if not elements:
         logger.warning(f"No elements extracted from {path.name}")
         return {"file": str(path), "status": "empty", "chunks": 0}
 
-    # ── Step 2: Attach figure captions ────────────────────────────────
     elements = attach_captions(elements)
 
-    # ── Step 3: Nougat disabled — using regex/HTML fallback parsers ──────
-    # To re-enable: set USE_NOUGAT=true in .env and pip install nougat-ocr
     nougat_data: dict | None = None
-    logger.info("Nougat disabled — using regex + HTML parsers for math/tables")
+    if settings.USE_NOUGAT:
+        if is_nougat_available():
+            formula_pages = sorted(
+                {
+                    e.get("metadata", {}).get("page_number", 1)
+                    for e in elements
+                    if e.get("type") in ("Formula", "Table")
+                }
+            )
+            table_pages = sorted(
+                {
+                    e.get("metadata", {}).get("page_number", 1)
+                    for e in elements
+                    if e.get("type") == "Table"
+                }
+            )
+            target_pages = sorted(set(formula_pages + table_pages))
 
-    # ── Step 4: Parse special element types ───────────────────────────
-    # Math — passes Nougat equations for accurate LaTeX matching
+            if target_pages:
+                logger.info(
+                    f"Nougat enabled - running on {len(target_pages)} pages "
+                    f"containing equations/tables: {target_pages}"
+                )
+                nougat_data = extract_with_nougat(path, pages=target_pages)
+            else:
+                logger.info("No Formula/Table elements found - skipping Nougat")
+
+            if nougat_data:
+                n_eq = len(nougat_data.get("equations", []))
+                n_tb = len(nougat_data.get("tables", []))
+                logger.info(f"Nougat extracted {n_eq} equations, {n_tb} tables")
+            elif target_pages:
+                logger.warning(
+                    "Nougat returned no data - using regex/HTML fallback parsers"
+                )
+        else:
+            logger.info(
+                "USE_NOUGAT=true but Nougat is not available - "
+                "using regex/HTML fallback parsers"
+            )
+    else:
+        logger.info("Nougat disabled - using regex + HTML parsers for math/tables")
+
     formula_els = [e for e in elements if e["type"] == "Formula"]
     parsed_formulas = {
         e["text"]: parse_formula_batch([e], llm_client, nougat_data)[0]
         for e in formula_els
     }
 
-    # Tables — passes Nougat tables for clean JSON extraction
     table_els = [e for e in elements if e["type"] == "Table"]
     parsed_tables = {
         e.get("table_html", e["text"]): parse_table_batch([e], llm_client, nougat_data)[0]
         for e in table_els
     }
 
-    # Figures
     image_els = [e for e in elements if e["type"] == "Image"]
     parsed_figures = parse_figure_batch(image_els, llm_client)
 
-    # Merge enriched elements back
     enriched: list[dict] = []
     img_idx = 0
     for el in elements:
@@ -98,7 +120,6 @@ def ingest_document(
         else:
             enriched.append(el)
 
-    # ── Step 4+5: Chunk with coreference resolution ────────────────────
     chunks_obj: list[Chunk] = chunk_elements(enriched, resolve_coref=True)
     parent_chunks, child_chunks = build_parent_child(chunks_obj)
 
@@ -109,11 +130,9 @@ def ingest_document(
         logger.warning(f"No chunks produced for {path.name}")
         return {"file": str(path), "status": "no_chunks", "chunks": 0}
 
-    # ── Step 6: Language detection per chunk ─────────────────────────
     for ch in chunks_dicts:
         ch["metadata"]["language"] = detect_language(ch.get("text", ""))
 
-    # ── Step 7: Domain detection ──────────────────────────────────────
     sample_texts = [c.get("text", "") for c in chunks_dicts[:10]]
     detected_domain = detect_domain(sample_texts)
     if domain is not None:
@@ -132,26 +151,23 @@ def ingest_document(
             )
     logger.info(f"Detected domain: {detected_domain}")
 
-    # ── Step 8: Version stamping ──────────────────────────────────────
     from ingestion.versioning import _file_hash
+
     new_version = _file_hash(str(path))
     old_version_ids = get_deprecated_ids(str(path), new_version)
 
     chunks_dicts = stamp_chunks(chunks_dicts, str(path), new_version)
     parent_dicts = stamp_chunks(parent_dicts, str(path), new_version)
 
-    # ── Step 9: Soft-delete old version ──────────────────────────────
     for old_ver in old_version_ids:
         vector_store.soft_delete_version(str(path), old_ver)
 
-    # ── Step 10: Embed + upsert ───────────────────────────────────────
     _, child_embeddings = embed_chunks(chunks_dicts, domain=embedding_domain)
     vector_store.add_chunks(chunks_dicts, child_embeddings)
 
     _, parent_embeddings = embed_chunks(parent_dicts, domain=embedding_domain)
     vector_store.add_parent_chunks(parent_dicts, parent_embeddings)
 
-    # ── Step 11: Rebuild BM25 ─────────────────────────────────────────
     all_chunks = vector_store.get_all_chunks()
     bm25_index.build(all_chunks)
 

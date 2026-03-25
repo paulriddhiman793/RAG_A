@@ -38,7 +38,10 @@ class LLMClient:
     def __init__(self):
         self._client = Groq(api_key=settings.GROQ_API_KEY)
         self.model = settings.LLM_MODEL
-        logger.info(f"Groq LLM client initialised | model: {self.model}")
+        logger.info(
+            "Groq LLM client initialised | "
+            f"text model: {self.model} | vision model: {settings.VISION_MODEL}"
+        )
 
     # ── Text completion ───────────────────────────────────────────────
 
@@ -135,11 +138,11 @@ class LLMClient:
         """
         Vision completion — image + text prompt.
 
-        Routes to meta-llama/llama-4-scout-17b-16e-instruct which supports
-        vision on Groq. Falls back to text-only if the call fails so the
-        pipeline never hard-crashes on image chunks.
+        Routes to the configured Groq vision model. Falls back to text-only if
+        the call fails so the pipeline never hard-crashes on image chunks.
         """
-        vision_model = "meta-llama/llama-4-scout-17b-16e-instruct"
+        vision_model = settings.VISION_MODEL
+        logger.info(f"Vision completion using model: {vision_model}")
 
         messages = [
             {

@@ -93,6 +93,18 @@ def query(
         rerank_query=user_query,
     )
 
+    if _has_formula_intent(user_query):
+        retrieved_chunks = _ensure_formula_context(retrieved_chunks, vector_store)
+        if retrieved_chunks:
+            top_score = max(top_score, retrieved_chunks[0].get("score", top_score))
+    if _has_figure_intent(user_query):
+        retrieved_chunks, top_score = _ensure_figure_context(
+            retrieved_chunks,
+            vector_store,
+            user_query,
+            top_score,
+        )
+
     if verbose:
         logger.info(f"Retrieved {len(retrieved_chunks)} chunks, top score: {top_score:.3f}")
 
@@ -154,3 +166,119 @@ def _blocked_response(user_query: str, reason: str) -> dict[str, Any]:
         "top_score": 0.0,
         "chunks_retrieved": 0,
     }
+
+
+def _has_formula_intent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "equation", "equations", "formula", "formulas", "latex", "loss function"
+    ])
+
+
+def _ensure_formula_context(
+    chunks: list[dict[str, Any]],
+    vector_store: VectorStore,
+) -> list[dict[str, Any]]:
+    if any(c.get("metadata", {}).get("element_type") == "Formula" for c in chunks):
+        return chunks
+
+    all_chunks = vector_store.get_all_chunks()
+    formula_chunks = [
+        c for c in all_chunks
+        if c.get("metadata", {}).get("element_type") == "Formula"
+    ]
+    if not formula_chunks:
+        return chunks
+
+    formula_chunks.sort(
+        key=lambda c: (
+            c.get("metadata", {}).get("page_number", 0),
+            c.get("metadata", {}).get("reading_order", 0),
+        )
+    )
+
+    existing_ids = {c.get("chunk_id") for c in chunks}
+    injected = []
+    for chunk in formula_chunks:
+        if chunk.get("chunk_id") in existing_ids:
+            continue
+        copy = dict(chunk)
+        copy["score"] = max(copy.get("score", 0.0), 0.95)
+        injected.append(copy)
+
+    if not injected:
+        return chunks
+
+    logger.info(
+        f"Formula-intent fallback injected {len(injected)} formula chunk(s) into context"
+    )
+    return injected + chunks
+
+
+def _has_figure_intent(query: str) -> bool:
+    q = (query or "").lower()
+    return any(term in q for term in [
+        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+    ])
+
+
+def _ensure_figure_context(
+    chunks: list[dict[str, Any]],
+    vector_store: VectorStore,
+    query: str,
+    top_score: float,
+) -> tuple[list[dict[str, Any]], float]:
+    q = (query or "").lower()
+    wants_all = any(term in q for term in ["how many", "count", "number of", "all figures", "list"])
+
+    current_figure_chunks = [
+        c for c in chunks
+        if c.get("metadata", {}).get("element_type") == "Image" and not _looks_table_like_image(c)
+    ]
+    if current_figure_chunks and not wants_all:
+        return chunks, top_score
+
+    all_chunks = vector_store.get_all_chunks()
+    figure_chunks = [
+        c for c in all_chunks
+        if c.get("metadata", {}).get("element_type") == "Image" and not _looks_table_like_image(c)
+    ]
+    if not figure_chunks:
+        return chunks, top_score
+
+    figure_chunks.sort(
+        key=lambda c: (
+            c.get("metadata", {}).get("page_number", 0),
+            c.get("metadata", {}).get("reading_order", 0),
+        )
+    )
+
+    if not wants_all:
+        figure_chunks = figure_chunks[: min(3, len(figure_chunks))]
+
+    existing_ids = {c.get("chunk_id") for c in chunks}
+    injected = []
+    for chunk in figure_chunks:
+        if chunk.get("chunk_id") in existing_ids:
+            continue
+        copy = dict(chunk)
+        copy["score"] = max(copy.get("score", 0.0), 0.93)
+        injected.append(copy)
+
+    if not injected:
+        return chunks, top_score
+
+    logger.info(
+        f"Figure-intent fallback injected {len(injected)} image chunk(s) into context"
+    )
+    return injected + chunks, max(top_score, injected[0].get("score", top_score))
+
+
+def _looks_table_like_image(chunk: dict[str, Any]) -> bool:
+    meta = chunk.get("metadata", {})
+    text = " ".join([
+        str(meta.get("caption", "")),
+        str(meta.get("alt_text", "")),
+        str(chunk.get("text", "")),
+    ]).strip().lower()
+    return text.startswith("table ") or text.startswith("table:") or "table 2" in text[:40]

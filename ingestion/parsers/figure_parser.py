@@ -10,6 +10,7 @@ The raw base64 image is sent to the LLM at retrieval time for visual reasoning.
 from __future__ import annotations
 
 import base64
+import re
 from typing import Any
 
 from utils.logger import logger
@@ -61,16 +62,42 @@ def attach_captions(
     Associate FigureCaption / Caption elements with the nearest Image.
     Must be called before parse_figure_batch to enrich captions.
     """
-    result = list(elements)
-    caption_buffer: str = ""
+    result = [dict(el) for el in elements]
+    pending_caption_by_page: dict[int, str] = {}
+    last_image_by_page: dict[int, int] = {}
 
     for i, el in enumerate(result):
         el_type = el.get("type", "")
-        if el_type in ("FigureCaption", "Caption"):
-            caption_buffer = el.get("text", "").strip()
-        elif el_type == "Image" and caption_buffer:
-            result[i] = {**el, "text": caption_buffer}
-            caption_buffer = ""
+        page = int(el.get("metadata", {}).get("page_number", 0) or 0)
+
+        if el_type == "Image":
+            pending_caption = pending_caption_by_page.pop(page, "")
+            existing_text = (el.get("text", "") or "").strip()
+            if pending_caption and _should_replace_image_text(existing_text, pending_caption):
+                result[i] = {**el, "text": pending_caption}
+            last_image_by_page[page] = i
+            continue
+
+        if el_type not in ("FigureCaption", "Caption"):
+            continue
+
+        caption = (el.get("text", "") or "").strip()
+        if not caption or _looks_like_table_caption(caption):
+            continue
+
+        previous_image_idx = last_image_by_page.get(page)
+        if previous_image_idx is not None:
+            previous_image = result[previous_image_idx]
+            existing_text = (
+                (previous_image.get("text", "") or "").strip()
+                or _extract_metadata_caption(previous_image)
+            )
+            if _should_replace_image_text(existing_text, caption):
+                result[previous_image_idx] = {**previous_image, "text": caption}
+                last_image_by_page.pop(page, None)
+                continue
+
+        pending_caption_by_page[page] = caption
 
     return result
 
@@ -114,7 +141,10 @@ def _generate_alt_text(
 
 def _build_embed_text(alt_text: str, caption: str) -> str:
     """Combine alt-text and caption into the string we embed."""
-    parts = []
+    parts = ["Figure"]
+    label = _extract_figure_label(caption)
+    if label:
+        parts.append(f"Label: {label}")
     if alt_text:
         parts.append(alt_text)
     if caption and caption not in alt_text:
@@ -138,3 +168,47 @@ def _format_for_context(
         parts.append(f"Description: {alt_text}")
     # The actual image_base64 is preserved in element for multimodal calls
     return "\n".join(parts)
+
+
+_FIGURE_LABEL_RE = re.compile(r"\bfig(?:ure)?\.?\s*(\d+)\b", re.IGNORECASE)
+
+
+def _extract_figure_label(text: str) -> str:
+    match = _FIGURE_LABEL_RE.search(text or "")
+    if not match:
+        return ""
+    return f"Fig. {match.group(1)}"
+
+
+def _looks_like_figure_caption(text: str) -> bool:
+    return bool(_FIGURE_LABEL_RE.search(text or ""))
+
+
+def _looks_like_table_caption(text: str) -> bool:
+    return bool(re.match(r"^\s*table\b", text or "", flags=re.IGNORECASE))
+
+
+def _looks_like_ocr_noise(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    if _looks_like_figure_caption(sample) or _looks_like_table_caption(sample):
+        return False
+    letters = sum(ch.isalpha() for ch in sample)
+    digits = sum(ch.isdigit() for ch in sample)
+    punctuation = sum(ch in "|[]()/:;,-" for ch in sample)
+    return punctuation + digits > letters or len(sample.split()) > 18
+
+
+def _should_replace_image_text(existing_text: str, new_caption: str) -> bool:
+    existing = (existing_text or "").strip()
+    incoming = (new_caption or "").strip()
+    if not incoming:
+        return False
+    if not existing:
+        return True
+    if _looks_like_figure_caption(incoming) and not _looks_like_figure_caption(existing):
+        return True
+    if _looks_like_ocr_noise(existing) and not _looks_like_ocr_noise(incoming):
+        return True
+    return False
