@@ -455,14 +455,29 @@ def _extract_requested_figure_number(text: str) -> int | None:
 
 
 def _extract_requested_figure_numbers(text: str) -> list[int]:
-    found = []
-    for match in _FIGURE_LABEL_RE.finditer(text or ""):
+    found: list[int] = []
+    q = text or ""
+
+    for match in _FIGURE_LABEL_RE.finditer(q):
         try:
             num = int(match.group(1))
         except Exception:
             continue
         if num not in found:
             found.append(num)
+
+    paired_pattern = re.compile(
+        r"\bfig(?:ure)?s?\.?\s*(\d+)\s*(?:,|and|&|vs\.?|versus)\s*(\d+)\b",
+        re.IGNORECASE,
+    )
+    for match in paired_pattern.finditer(q):
+        for group in (1, 2):
+            try:
+                num = int(match.group(group))
+            except Exception:
+                continue
+            if num not in found:
+                found.append(num)
     return found
 
 
