@@ -5,8 +5,7 @@ Vector store — ChromaDB wrapper with:
   - Parent-child chunk storage
   - Metadata filtering
 """
-from __future__ import annotations
-
+import time
 from typing import Any
 
 import chromadb
@@ -34,6 +33,13 @@ class VectorStore:
             name=settings.COLLECTION_NAME + "_parents",
             metadata={"hnsw:space": "cosine"},
         )
+        # Short-lived caches so multiple intent-fallback calls during one
+        # query don't each hit ChromaDB.  Invalidated on any mutation.
+        self._all_chunks_cache: list[dict[str, Any]] | None = None
+        self._all_chunks_cache_ts: float = 0.0
+        self._all_parents_cache: list[dict[str, Any]] | None = None
+        self._all_parents_cache_ts: float = 0.0
+        self._CACHE_TTL = 30.0  # seconds
         logger.info(
             f"VectorStore ready. "
             f"Child chunks: {self._col.count()}, "
@@ -65,6 +71,7 @@ class VectorStore:
             metadatas=metas,
             embeddings=embs,
         )
+        self._invalidate_cache()
         logger.info(f"Upserted {len(ids)} child chunks into vector store")
 
     def add_parent_chunks(
@@ -82,6 +89,7 @@ class VectorStore:
             metas.append(build_metadata(p))
             embs.append(embeddings[i].tolist())
         self._parent_col.upsert(ids=ids, documents=docs, metadatas=metas, embeddings=embs)
+        self._invalidate_cache()
         logger.info(f"Upserted {len(ids)} parent chunks")
 
     def soft_delete_version(self, source_file: str, old_version: str) -> None:
@@ -102,6 +110,7 @@ class VectorStore:
                 m["is_deprecated"] = True
                 new_metas.append(m)
             self._col.update(ids=ids, metadatas=new_metas)
+            self._invalidate_cache()
             logger.info(f"Soft-deleted {len(ids)} chunks from {source_file} v{old_version[:8]}")
         except Exception as e:
             logger.warning(f"Soft-delete failed: {e}")
@@ -178,7 +187,13 @@ class VectorStore:
             return []
 
     def get_all_chunks(self) -> list[dict[str, Any]]:
-        """Return all non-deprecated chunks for BM25 index building."""
+        """Return all non-deprecated chunks (cached for repeated calls within a query)."""
+        now = time.monotonic()
+        if (
+            self._all_chunks_cache is not None
+            and (now - self._all_chunks_cache_ts) < self._CACHE_TTL
+        ):
+            return self._all_chunks_cache
         try:
             r = self._col.get(
                 where={"is_deprecated": {"$eq": False}},
@@ -196,13 +211,21 @@ class VectorStore:
                     "metadata": restore_metadata(meta),
                     "score": 0.0,
                 })
+            self._all_chunks_cache = out
+            self._all_chunks_cache_ts = now
             return out
         except Exception as e:
             logger.warning(f"get_all_chunks failed: {e}")
             return []
 
     def get_all_parent_chunks(self) -> list[dict[str, Any]]:
-        """Return all stored parent chunks for summary-style query fallbacks."""
+        """Return all parent chunks (cached for repeated calls within a query)."""
+        now = time.monotonic()
+        if (
+            self._all_parents_cache is not None
+            and (now - self._all_parents_cache_ts) < self._CACHE_TTL
+        ):
+            return self._all_parents_cache
         try:
             r = self._parent_col.get(
                 include=["documents", "metadatas"],
@@ -222,6 +245,8 @@ class VectorStore:
                     "metadata": restored,
                     "score": 0.0,
                 })
+            self._all_parents_cache = out
+            self._all_parents_cache_ts = now
             return out
         except Exception as e:
             logger.warning(f"get_all_parent_chunks failed: {e}")
@@ -250,3 +275,8 @@ class VectorStore:
                 "score": round(score, 4),
             })
         return sorted(results, key=lambda x: x["score"], reverse=True)
+
+    def _invalidate_cache(self) -> None:
+        """Clear the short-lived caches after any mutation."""
+        self._all_chunks_cache = None
+        self._all_parents_cache = None

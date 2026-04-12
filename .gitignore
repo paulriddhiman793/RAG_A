@@ -17,6 +17,7 @@ envcf/
 # Local indexes, caches, and model artifacts
 chroma_db/
 bm25_index.pkl
+bm25_index.json
 version_registry.json
 logs/
 .cache/

@@ -216,7 +216,9 @@ def _ensure_formula_context(
         if chunk.get("chunk_id") in existing_ids:
             continue
         copy = dict(chunk)
-        copy["score"] = max(copy.get("score", 0.0), 0.95)
+        # Score just above RELEVANCE_THRESHOLD so it passes the gate
+        # without overshadowing truly relevant reranked chunks.
+        copy["score"] = max(copy.get("score", 0.0), settings.RELEVANCE_THRESHOLD + 0.15)
         injected.append(copy)
 
     if not injected:
@@ -271,7 +273,7 @@ def _ensure_figure_context(
         if chunk.get("chunk_id") in existing_ids:
             continue
         copy = dict(chunk)
-        copy["score"] = max(copy.get("score", 0.0), 0.93)
+        copy["score"] = max(copy.get("score", 0.0), settings.RELEVANCE_THRESHOLD + 0.10)
         injected.append(copy)
 
     if not injected:
@@ -314,11 +316,11 @@ def _ensure_summary_context(
         if chunk.get("chunk_id") in existing_ids:
             continue
         copy = dict(chunk)
-        copy["score"] = max(copy.get("score", 0.0), 0.92)
+        copy["score"] = max(copy.get("score", 0.0), settings.RELEVANCE_THRESHOLD + 0.10)
         injected.append(copy)
 
     if not injected:
-        return chunks, max(top_score, 0.92 if chunks else top_score)
+        return chunks, max(top_score, (settings.RELEVANCE_THRESHOLD + 0.10) if chunks else top_score)
 
     logger.info(
         f"Summary-intent fallback injected {len(injected)} parent chunk(s) into context"
@@ -364,7 +366,7 @@ def _ensure_metric_context(
         if score <= 0:
             continue
         copy = dict(chunk)
-        copy["score"] = max(copy.get("score", 0.0), min(0.97, 0.55 + (score * 0.06)))
+        copy["score"] = max(copy.get("score", 0.0), min(settings.RELEVANCE_THRESHOLD + 0.15, 0.40 + (score * 0.04)))
         ranked.append(copy)
 
     if not ranked:

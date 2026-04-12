@@ -172,6 +172,9 @@ def _try_llmlingua(
 ) -> list[dict] | None:
     """
     Attempt sentence-level compression using LLMLingua.
+
+    Each chunk is compressed individually so that per-chunk provenance
+    (chunk_id, metadata, source_file) is preserved for citation grounding.
     Returns None if LLMLingua is not installed or fails.
     """
     try:
@@ -183,30 +186,44 @@ def _try_llmlingua(
             device_map="cpu",
         )
 
-        full_text = "\n\n".join(c.get("text", "") for c in chunks)
-        current_tokens = len(_TOKENIZER.encode(full_text))
-        ratio = max_tokens / current_tokens if current_tokens > 0 else 1.0
-
-        result = compressor.compress_prompt(
-            context=[c.get("text", "") for c in chunks],
-            instruction="",
-            question=query,
-            target_token=max_tokens,
-            iterative_size=200,
-        )
-
-        compressed_text = result.get("compressed_prompt", "")
-        if not compressed_text:
+        current_tokens = _total_tokens(chunks)
+        if current_tokens <= 0:
             return None
 
-        # Wrap compressed text back into a single pseudo-chunk
-        return [{
-            "chunk_id": "compressed",
-            "text": compressed_text,
-            "context_text": compressed_text,
-            "metadata": {"element_type": "compressed", "source_file": "multiple"},
-            "score": max(c.get("score", 0.0) for c in chunks),
-        }]
+        # Per-chunk compression preserving provenance
+        compressed: list[dict] = []
+        for chunk in chunks:
+            chunk_text = chunk.get("text", "")
+            chunk_tokens = len(_TOKENIZER.encode(chunk_text))
+            if chunk_tokens <= 0:
+                compressed.append(chunk)
+                continue
+
+            # Allocate a proportional slice of the total budget
+            chunk_budget = max(20, int(max_tokens * chunk_tokens / current_tokens))
+
+            try:
+                result = compressor.compress_prompt(
+                    context=[chunk_text],
+                    instruction="",
+                    question=query,
+                    target_token=chunk_budget,
+                    iterative_size=200,
+                )
+                compressed_text = result.get("compressed_prompt", "")
+                if compressed_text:
+                    compressed.append({
+                        **chunk,
+                        "text": compressed_text,
+                        "context_text": compressed_text,
+                    })
+                else:
+                    compressed.append(chunk)
+            except Exception:
+                # If individual chunk compression fails, keep original
+                compressed.append(chunk)
+
+        return compressed if compressed else None
 
     except ImportError:
         logger.debug("LLMLingua not available, using smart selection")

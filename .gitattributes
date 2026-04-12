@@ -1,0 +1,23 @@
+# Auto-normalise line endings on commit
+* text=auto eol=lf
+
+# Ensure these are always treated as text
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.env text eol=lf
+
+# Binary files — never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.pkl binary

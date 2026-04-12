@@ -4,10 +4,14 @@ BM25 keyword search — complements vector search for:
   - Cases where semantic similarity fails (specific numbers, codes)
 
 Built fresh from all stored chunks on startup, rebuilt after ingestion.
+
+Persistence uses JSON for the chunk data and rebuilds the BM25Okapi
+object from the stored corpus on load.  This avoids the arbitrary-code-
+execution risk of Python pickle.
 """
 from __future__ import annotations
 
-import pickle
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +20,9 @@ from rank_bm25 import BM25Okapi
 from utils.logger import logger
 
 
-_BM25_CACHE_PATH = Path("./bm25_index.pkl")
+_BM25_CACHE_PATH = Path("./bm25_index.json")
+# Keep the old pickle path around so we can clean it up on first save.
+_LEGACY_PICKLE_PATH = Path("./bm25_index.pkl")
 
 
 class BM25Index:
@@ -64,10 +70,10 @@ class BM25Index:
         if not _BM25_CACHE_PATH.exists():
             return False
         try:
-            with open(_BM25_CACHE_PATH, "rb") as f:
-                data = pickle.load(f)
-            self._bm25 = data["bm25"]
-            self._chunks = data["chunks"]
+            raw = json.loads(_BM25_CACHE_PATH.read_text(encoding="utf-8"))
+            self._chunks = raw["chunks"]
+            corpus = [_tokenize(c.get("text", "")) for c in self._chunks]
+            self._bm25 = BM25Okapi(corpus)
             logger.info(f"BM25 index loaded ({len(self._chunks)} docs)")
             return True
         except Exception as e:
@@ -76,8 +82,15 @@ class BM25Index:
 
     def _save(self) -> None:
         try:
-            with open(_BM25_CACHE_PATH, "wb") as f:
-                pickle.dump({"bm25": self._bm25, "chunks": self._chunks}, f)
+            payload = {"chunks": self._chunks}
+            _BM25_CACHE_PATH.write_text(
+                json.dumps(payload, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+            # Remove legacy pickle file if it still exists
+            if _LEGACY_PICKLE_PATH.exists():
+                _LEGACY_PICKLE_PATH.unlink(missing_ok=True)
+                logger.info("Removed legacy pickle BM25 cache")
         except Exception as e:
             logger.warning(f"BM25 save failed: {e}")
 

@@ -1,46 +1,46 @@
 # ── Core document ingestion ──────────────────────────────────────────
-unstructured-client
-unstructured[pdf,docx,pptx,xlsx,image]
+unstructured-client>=0.25,<1.0
+unstructured[pdf,docx,pptx,xlsx,image]>=0.15,<1.0
 
 # ── Vector store ──────────────────────────────────────────────────────
-chromadb
+chromadb>=0.5,<1.0
 
 # ── Embeddings ────────────────────────────────────────────────────────
-sentence-transformers
-torch
-transformers
+sentence-transformers>=3.0,<4.0
+torch>=2.0,<3.0
+transformers>=4.40,<5.0
 
 # ── BM25 keyword search ───────────────────────────────────────────────
-rank-bm25
+rank-bm25>=0.2,<1.0
 
 # ── LLM client ───────────────────────────────────────────────────────
-groq
+groq>=0.9,<1.0
 
 # ── NLP utilities ────────────────────────────────────────────────────
-langdetect
-lingua-language-detector
+langdetect>=1.0,<2.0
+lingua-language-detector>=2.0,<3.0
 
-# ── Context compression ───────────────────────────────────────────────
-llmlingua
+# ── Context compression (optional) ────────────────────────────────────
+llmlingua>=0.2,<1.0
 
 # ── Coreference resolution ────────────────────────────────────────────
-fastcoref
+fastcoref>=2.1,<3.0
 
 # ── Config & validation ───────────────────────────────────────────────
-pydantic
-pydantic-settings
+pydantic>=2.0,<3.0
+pydantic-settings>=2.0,<3.0
 
 # ── Utilities ────────────────────────────────────────────────────────
-numpy
-pandas
-tiktoken
-tenacity
-loguru
-rich
-tqdm
-httpx
-Pillow
-beautifulsoup4
+numpy>=1.24,<3.0
+pandas>=2.0,<3.0
+tiktoken>=0.7,<1.0
+tenacity>=8.0,<10.0
+loguru>=0.7,<1.0
+rich>=13.0,<14.0
+tqdm>=4.60,<5.0
+httpx>=0.27,<1.0
+Pillow>=10.0,<12.0
+beautifulsoup4>=4.12,<5.0
 
 # ── Math parsing ─────────────────────────────────────────────────────
-latex2mathml
+latex2mathml>=3.0,<4.0

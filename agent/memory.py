@@ -8,6 +8,10 @@ from typing import Any
 
 from config import settings
 
+# Maximum number of history entries per session before truncation.
+# Keeps the most recent entries and discards the oldest.
+_MAX_HISTORY_ENTRIES = 50
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -15,6 +19,8 @@ def _utc_now() -> str:
 
 def _safe_session_id(session_id: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (session_id or "default").strip())
+    # Strip path-traversal sequences that survived char-level sanitization
+    cleaned = cleaned.replace("..", "").strip("._")
     return cleaned or "default"
 
 
@@ -46,6 +52,10 @@ class AgentMemoryStore:
 
     def save_session(self, session: dict[str, Any]) -> None:
         session["updated_at"] = _utc_now()
+        # Prevent unbounded growth — keep only the most recent entries
+        history = session.get("history", [])
+        if len(history) > _MAX_HISTORY_ENTRIES:
+            session["history"] = history[-_MAX_HISTORY_ENTRIES:]
         path = self._session_path(str(session.get("session_id", "default")))
         path.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
 
