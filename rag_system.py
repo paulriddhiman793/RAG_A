@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agent import AgentLoop, AgentMemoryStore, ToolRegistry
+from agent import AgentLoop, AgentMemoryStore, QueryRouter, ToolRegistry
 from config import settings
 from generation.llm_client import LLMClient
 from indexing.vector_store import VectorStore
@@ -41,6 +41,7 @@ class RAGSystem:
         self.vector_store = VectorStore()
         self.bm25 = BM25Index()
         self.memory_store = AgentMemoryStore()
+        self.router = QueryRouter()
         self.tool_registry = ToolRegistry(
             vector_store=self.vector_store,
             bm25_index=self.bm25,
@@ -128,6 +129,45 @@ class RAGSystem:
             verbose=verbose,
         )
 
+    def route_query(self, question: str) -> dict[str, Any]:
+        """Return the automatic routing decision for a query."""
+        return self.router.decide(question).to_dict()
+
+    def auto_query(
+        self,
+        question: str,
+        session_id: str = "default",
+        max_steps: int | None = None,
+        verify: bool = True,
+        verbose: bool = False,
+    ) -> dict[str, Any]:
+        """Automatically choose direct RAG or agent mode for a question."""
+        decision = self.router.decide(question)
+        if not settings.AUTO_ROUTE_QUERIES:
+            direct_result = self.query(question, verify=verify, verbose=verbose)
+            direct_result["mode"] = "direct"
+            direct_result["route_reason"] = "automatic routing disabled in settings"
+            direct_result["route_decision"] = decision.to_dict()
+            return direct_result
+
+        if decision.mode == "agent":
+            agent_result = self.agent.run(
+                question,
+                session_id=session_id,
+                max_steps=max_steps,
+                routing_hint=decision.to_dict(),
+            )
+            agent_result["mode"] = "agent"
+            agent_result["route_reason"] = decision.reason
+            agent_result["route_decision"] = decision.to_dict()
+            return agent_result
+
+        direct_result = self.query(question, verify=verify, verbose=verbose)
+        direct_result["mode"] = "direct"
+        direct_result["route_reason"] = decision.reason
+        direct_result["route_decision"] = decision.to_dict()
+        return direct_result
+
     def ask(self, question: str) -> str:
         """Convenience wrapper — returns just the answer string."""
         result = self.query(question)
@@ -140,7 +180,17 @@ class RAGSystem:
         max_steps: int | None = None,
     ) -> dict[str, Any]:
         """Run the agentic planner/tool loop for a question."""
-        return self.agent.run(question, session_id=session_id, max_steps=max_steps)
+        decision = self.router.decide(question)
+        result = self.agent.run(
+            question,
+            session_id=session_id,
+            max_steps=max_steps,
+            routing_hint=decision.to_dict(),
+        )
+        result["mode"] = "agent"
+        result["route_reason"] = decision.reason
+        result["route_decision"] = decision.to_dict()
+        return result
 
     def run_tool(self, name: str, tool_input: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute an explicit tool from the tool registry."""
@@ -161,4 +211,5 @@ class RAGSystem:
             "domain": self.domain or "auto",
             "agent_max_steps": settings.AGENT_MAX_STEPS,
             "tools_available": len(self.tool_registry.list_tools()),
+            "auto_route_queries": settings.AUTO_ROUTE_QUERIES,
         }

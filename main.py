@@ -70,51 +70,70 @@ def cmd_ingest(args, rag: RAGSystem) -> None:
 
 def cmd_query(args, rag: RAGSystem) -> None:
     question = args.question
+    if args.direct and args.agent:
+        console.print("[red]Choose only one of --direct or --agent.[/red]")
+        sys.exit(1)
     console.print(f"\n[bold]Question:[/bold] {question}\n")
 
-    with console.status("[bold green]Retrieving and generating answer…"):
-        result = rag.query(question, verify=not args.no_verify, verbose=args.verbose)
-
-    # Print answer
-    answer_panel = Panel(
-        Markdown(result["answer"]),
-        title="[bold green]Answer",
-        border_style="green" if result["is_grounded"] else "yellow",
-    )
-    console.print(answer_panel)
-
-    # Print sources
-    if result["sources_used"]:
-        t = Table(title="Sources used", show_header=True)
-        t.add_column("No.", style="dim", width=4)
-        t.add_column("File")
-        t.add_column("Page", justify="right")
-        t.add_column("Section")
-        t.add_column("Type")
-        for s in result["sources_used"]:
-            t.add_row(
-                str(s["source_num"]),
-                s["file"],
-                str(s["page"]),
-                s["section"][:40],
-                s["type"],
+    with console.status("[bold green]Retrieving and generating answer..."):
+        if args.direct:
+            result = rag.query(question, verify=not args.no_verify, verbose=args.verbose)
+            result["mode"] = "direct"
+            result["route_reason"] = "forced direct mode by CLI flag"
+        elif args.agent:
+            result = rag.agent_query(
+                question,
+                session_id=args.session,
+                max_steps=args.max_steps,
             )
-        console.print(t)
-
-    # Grounding status
-    if result["flagged_claims"]:
-        console.print("\n[yellow]⚠ Grounding warnings:[/yellow]")
-        for claim in result["flagged_claims"]:
-            console.print(f"  • {claim}")
-
-    if result["no_answer"]:
-        console.print("\n[dim]No relevant content found in indexed documents.[/dim]")
+            result["mode"] = "agent"
+            result["route_reason"] = "forced agent mode by CLI flag"
+        else:
+            result = rag.auto_query(
+                question,
+                session_id=args.session,
+                max_steps=args.max_steps,
+                verify=not args.no_verify,
+                verbose=args.verbose,
+            )
 
     console.print(
-        f"\n[dim]Score: {result['top_score']:.3f} | "
-        f"Chunks: {result['chunks_retrieved']} | "
-        f"Queries expanded: {len(result['expanded_queries'])}[/dim]"
+        f"[dim]Mode: {result.get('mode', 'direct')} | "
+        f"Reason: {result.get('route_reason', '-')}"
+        f"[/dim]\n"
     )
+
+    if result.get("mode") == "agent":
+        answer_panel = Panel(
+            Markdown(result["answer"]),
+            title="[bold cyan]Agent Answer",
+            border_style="cyan",
+        )
+        console.print(answer_panel)
+
+        if args.show_trace and result.get("steps"):
+            t = Table(title=f"Agent Trace | session={result['session_id']}", show_header=True)
+            t.add_column("Step", width=4)
+            t.add_column("Tool")
+            t.add_column("Thought")
+            t.add_column("Observation")
+            for step in result["steps"]:
+                t.add_row(
+                    str(step.get("step", "")),
+                    step.get("tool_name", ""),
+                    str(step.get("thought", ""))[:80],
+                    str(step.get("observation", ""))[:120],
+                )
+            console.print(t)
+
+        console.print(
+            f"\n[dim]Session: {result['session_id']} | "
+            f"Steps: {len(result.get('steps', []))} | "
+            f"Halt reason: {result.get('halt_reason', 'unknown')}[/dim]"
+        )
+        return
+
+    _render_direct_result(result)
 
 
 def cmd_agent_query(args, rag: RAGSystem) -> None:
@@ -157,6 +176,46 @@ def cmd_agent_query(args, rag: RAGSystem) -> None:
     )
 
 
+def _render_direct_result(result: dict) -> None:
+    answer_panel = Panel(
+        Markdown(result["answer"]),
+        title="[bold green]Answer",
+        border_style="green" if result["is_grounded"] else "yellow",
+    )
+    console.print(answer_panel)
+
+    if result["sources_used"]:
+        t = Table(title="Sources used", show_header=True)
+        t.add_column("No.", style="dim", width=4)
+        t.add_column("File")
+        t.add_column("Page", justify="right")
+        t.add_column("Section")
+        t.add_column("Type")
+        for s in result["sources_used"]:
+            t.add_row(
+                str(s["source_num"]),
+                s["file"],
+                str(s["page"]),
+                s["section"][:40],
+                s["type"],
+            )
+        console.print(t)
+
+    if result["flagged_claims"]:
+        console.print("\n[yellow]⚠ Grounding warnings:[/yellow]")
+        for claim in result["flagged_claims"]:
+            console.print(f"  • {claim}")
+
+    if result["no_answer"]:
+        console.print("\n[dim]No relevant content found in indexed documents.[/dim]")
+
+    console.print(
+        f"\n[dim]Score: {result['top_score']:.3f} | "
+        f"Chunks: {result['chunks_retrieved']} | "
+        f"Queries expanded: {len(result['expanded_queries'])}[/dim]"
+    )
+
+
 def cmd_interactive(rag: RAGSystem) -> None:
     console.print(Panel(
         "[bold green]Advanced RAG — Interactive Mode[/bold green]\n"
@@ -173,7 +232,14 @@ def cmd_interactive(rag: RAGSystem) -> None:
         if question.lower() in ("exit", "quit", "q"):
             break
         args_mock = argparse.Namespace(
-            question=question, no_verify=False, verbose=False
+            question=question,
+            no_verify=False,
+            verbose=False,
+            direct=False,
+            agent=False,
+            session="default",
+            max_steps=None,
+            show_trace=False,
         )
         cmd_query(args_mock, rag)
 
@@ -227,6 +293,22 @@ def cmd_tools(rag: RAGSystem) -> None:
     console.print(t)
 
 
+def cmd_route(args, rag: RAGSystem) -> None:
+    result = rag.route_query(args.question)
+    panel = Panel(
+        Markdown(
+            f"Mode: `{result['mode']}`\n\n"
+            f"Reason: {result['reason']}\n\n"
+            f"Suggested tool: `{result['suggested_tool']}`\n\n"
+            f"Suggested input: `{json.dumps(result['suggested_input'])}`\n\n"
+            f"Complexity: `{result['complexity']}`"
+        ),
+        title="[bold blue]Route Decision",
+        border_style="blue",
+    )
+    console.print(panel)
+
+
 def cmd_tool(args, rag: RAGSystem) -> None:
     try:
         payload = json.loads(args.input) if args.input else {}
@@ -270,6 +352,16 @@ def main() -> None:
                          help="Skip NLI hallucination verification")
     p_query.add_argument("--verbose", action="store_true",
                          help="Show expanded queries and retrieval details")
+    p_query.add_argument("--direct", action="store_true",
+                         help="Force direct RAG mode")
+    p_query.add_argument("--agent", action="store_true",
+                         help="Force agent mode")
+    p_query.add_argument("--session", default="default",
+                         help="Session ID when agent mode is used")
+    p_query.add_argument("--max-steps", type=int, default=None,
+                         help="Maximum planner/tool steps when agent mode is used")
+    p_query.add_argument("--show-trace", action="store_true",
+                         help="Show tool trace when agent mode is used")
 
     # agent-query
     p_agent_query = sub.add_parser("agent-query", help="Ask a question via the agent loop")
@@ -297,6 +389,10 @@ def main() -> None:
 
     # tools
     sub.add_parser("tools", help="List available agent tools")
+
+    # route
+    p_route = sub.add_parser("route", help="Inspect automatic routing for a question")
+    p_route.add_argument("question", help="Question to inspect")
 
     # tool execution
     p_tool = sub.add_parser("tool", help="Execute one explicit agent tool")
@@ -326,6 +422,8 @@ def main() -> None:
         cmd_stats(rag)
     elif args.command == "tools":
         cmd_tools(rag)
+    elif args.command == "route":
+        cmd_route(args, rag)
     elif args.command == "tool":
         cmd_tool(args, rag)
 

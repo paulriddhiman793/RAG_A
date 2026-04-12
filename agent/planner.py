@@ -26,6 +26,7 @@ class Planner:
         session_context: str,
         prior_steps: list[dict],
         max_steps: int,
+        routing_hint: dict | None = None,
     ) -> PlannerDecision:
         step_count = len(prior_steps)
         prompt = (
@@ -38,9 +39,11 @@ class Planner:
             "4. Use answer_query when you are ready to produce the final grounded answer.\n"
             "5. If a tool observation already contains a good grounded answer, you may finish and reuse it.\n"
             "6. Keep tool_input as a JSON object.\n"
-            "7. If you finish, set done=true and provide final_answer.\n\n"
+            "7. You may compose tool_input freely using semantically correct keys; the tool layer can normalize aliases.\n"
+            "8. If you finish, set done=true and provide final_answer.\n\n"
             f"User goal:\n{user_goal}\n\n"
             f"Available tools:\n{tool_descriptions}\n\n"
+            f"Routing hint:\n{routing_hint or 'None'}\n\n"
             f"Session context:\n{session_context}\n\n"
             f"Prior steps taken: {step_count} / {max_steps}\n"
             f"Prior step records:\n{prior_steps}\n\n"
@@ -51,7 +54,7 @@ class Planner:
             raw = self.llm_client.complete_json(prompt, max_tokens=600)
         except Exception as e:
             logger.warning(f"Planner failed, using fallback action: {e}")
-            raw = self._fallback_plan(user_goal, prior_steps)
+            raw = self._fallback_plan(user_goal, prior_steps, routing_hint=routing_hint)
 
         decision = PlannerDecision(
             thought=str(raw.get("thought", "")).strip() or "Use the general QA tool.",
@@ -65,7 +68,11 @@ class Planner:
         return decision
 
     @staticmethod
-    def _fallback_plan(user_goal: str, prior_steps: list[dict]) -> dict:
+    def _fallback_plan(
+        user_goal: str,
+        prior_steps: list[dict],
+        routing_hint: dict | None = None,
+    ) -> dict:
         q = (user_goal or "").lower()
         if prior_steps:
             last_observation = str(prior_steps[-1].get("observation", "")).strip()
@@ -77,6 +84,15 @@ class Planner:
                     "done": True,
                     "final_answer": last_observation,
                 }
+
+        if routing_hint and routing_hint.get("suggested_tool"):
+            return {
+                "thought": f"Use the router-suggested tool: {routing_hint.get('suggested_tool')}.",
+                "tool_name": routing_hint.get("suggested_tool", "answer_query"),
+                "tool_input": routing_hint.get("suggested_input", {"question": user_goal}),
+                "done": False,
+                "final_answer": "",
+            }
 
         if any(term in q for term in ["summary", "summarize", "summarise", "overview", "what is the pdf about"]):
             return {

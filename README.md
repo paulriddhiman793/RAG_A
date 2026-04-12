@@ -639,10 +639,21 @@ python main.py ingest .\docs\paper.pdf
 python main.py ingest .\docs
 ```
 
-#### Direct RAG Query
+#### Query Command With Automatic Routing
 
 ```powershell
 python main.py query "What is the difference between Table 1 and Table 2?"
+python main.py query "Compare figure 2 and figure 3, then summarize the result" --show-trace
+python main.py query "What is the R2 score of Random Forest Regressor model"
+```
+
+`query` now auto-decides whether to use direct RAG or the agent loop.
+
+Use these flags when you want manual control:
+
+```powershell
+python main.py query "what is the pdf about" --direct
+python main.py query "what is the pdf about" --agent --show-trace
 ```
 
 #### Direct Interactive Mode
@@ -663,6 +674,7 @@ python main.py stats
 
 ```powershell
 python main.py tools
+python main.py route "Compare figure 2 and figure 3, then summarize the result"
 ```
 
 #### Execute One Explicit Tool
@@ -740,6 +752,7 @@ COLLECTION_NAME=rag_collection
 RELEVANCE_THRESHOLD=0.10
 USE_NOUGAT=false
 USE_FORMULA_VISION_FALLBACK=true
+AUTO_ROUTE_QUERIES=true
 AGENT_MAX_STEPS=5
 AGENT_MEMORY_DIR=./agent_sessions
 ```
@@ -760,8 +773,10 @@ AGENT_MEMORY_DIR=./agent_sessions
 | `USE_NOUGAT` | Enables Nougat for formula/table extraction if available. |
 | `USE_FORMULA_VISION_FALLBACK` | Uses the vision model to rescue corrupted formula extraction. |
 | `RECENCY_DECAY_DAYS` | Controls recency bonus applied to newer ingestions. |
+| `AUTO_ROUTE_QUERIES` | Enables automatic direct-vs-agent routing in the standard `query` command. |
 | `AGENT_MAX_STEPS` | Maximum number of planner-tool-replan cycles in one agent run. |
 | `AGENT_MEMORY_DIR` | Directory where session memory JSON files are stored. |
+| `TOOL_PROMPT_*` | Lets you customize tool wrapper prompts from `.env` without editing code. |
 
 ## Typical Outputs
 

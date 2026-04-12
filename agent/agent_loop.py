@@ -28,6 +28,7 @@ class AgentLoop:
         user_query: str,
         session_id: str = "default",
         max_steps: int | None = None,
+        routing_hint: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         max_steps = max_steps or settings.AGENT_MAX_STEPS
         self.memory_store.add_user_message(session_id, user_query)
@@ -43,6 +44,7 @@ class AgentLoop:
                 session_context=session_context,
                 prior_steps=steps,
                 max_steps=max_steps,
+                routing_hint=routing_hint,
             )
 
             if decision.done:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from config import settings
@@ -88,6 +89,11 @@ class ToolRegistry:
                 "input_schema": {},
                 "handler": self.stats,
             },
+            "answer_from_retrieval": {
+                "description": "Retrieve chunks first and then answer from that retrieved context.",
+                "input_schema": {"question": "string"},
+                "handler": self.answer_from_retrieval,
+            },
         }
 
     def list_tools(self) -> list[dict[str, Any]]:
@@ -107,18 +113,18 @@ class ToolRegistry:
         )
 
     def run_tool(self, name: str, tool_input: dict[str, Any] | None = None) -> dict[str, Any]:
-        spec = self._tools.get(name)
+        canonical_name, normalized_input = self._normalize_tool_input(name, tool_input or {})
+        spec = self._tools.get(canonical_name)
         if not spec:
             return {
-                "tool_name": name,
+                "tool_name": canonical_name,
                 "status": "error",
-                "observation": f"Unknown tool: {name}",
+                "observation": f"Unknown tool: {canonical_name}",
             }
         try:
-            payload = tool_input or {}
-            result = spec["handler"](**payload)
+            result = spec["handler"](**normalized_input)
             if "tool_name" not in result:
-                result["tool_name"] = name
+                result["tool_name"] = canonical_name
             if "status" not in result:
                 result["status"] = "success"
             if "observation" not in result:
@@ -126,16 +132,16 @@ class ToolRegistry:
             return result
         except TypeError as e:
             return {
-                "tool_name": name,
+                "tool_name": canonical_name,
                 "status": "error",
-                "observation": f"Invalid tool input for {name}: {e}",
+                "observation": f"Invalid tool input for {canonical_name}: {e}",
             }
         except Exception as e:
-            logger.error(f"Tool {name} failed: {e}")
+            logger.error(f"Tool {canonical_name} failed: {e}")
             return {
-                "tool_name": name,
+                "tool_name": canonical_name,
                 "status": "error",
-                "observation": f"Tool {name} failed: {e}",
+                "observation": f"Tool {canonical_name} failed: {e}",
             }
 
     def search_docs(self, query: str, top_k: int = 5) -> dict[str, Any]:
@@ -190,25 +196,37 @@ class ToolRegistry:
         }
 
     def summarize_document(self) -> dict[str, Any]:
-        return self.answer_query("Summary of pdf")
+        return self.answer_query(settings.TOOL_PROMPT_SUMMARIZE_DOCUMENT)
 
     def explain_figure(self, figure_number: int) -> dict[str, Any]:
-        return self.answer_query(f"Kindly explain Figure {int(figure_number)} properly")
+        prompt = self._render_prompt(
+            settings.TOOL_PROMPT_EXPLAIN_FIGURE,
+            figure_number=int(figure_number),
+        )
+        return self.answer_query(prompt)
 
     def compare_figures(self, left_figure: int, right_figure: int) -> dict[str, Any]:
-        return self.answer_query(
-            f"What is the difference between Figure {int(left_figure)} and Figure {int(right_figure)}?"
+        prompt = self._render_prompt(
+            settings.TOOL_PROMPT_COMPARE_FIGURES,
+            left_figure=int(left_figure),
+            right_figure=int(right_figure),
         )
+        return self.answer_query(prompt)
 
     def lookup_table(self, table_number: int) -> dict[str, Any]:
-        return self.answer_query(
-            f"Explain Table {int(table_number)} briefly and state its contents."
+        prompt = self._render_prompt(
+            settings.TOOL_PROMPT_LOOKUP_TABLE,
+            table_number=int(table_number),
         )
+        return self.answer_query(prompt)
 
     def compare_tables(self, left_table: int, right_table: int) -> dict[str, Any]:
-        return self.answer_query(
-            f"What is the difference between Table {int(left_table)} and Table {int(right_table)}?"
+        prompt = self._render_prompt(
+            settings.TOOL_PROMPT_COMPARE_TABLES,
+            left_table=int(left_table),
+            right_table=int(right_table),
         )
+        return self.answer_query(prompt)
 
     def lookup_formula(
         self,
@@ -217,15 +235,21 @@ class ToolRegistry:
     ) -> dict[str, Any]:
         final_question = (question or "").strip()
         if not final_question and formula_hint:
-            final_question = f"mention the {formula_hint} equation"
+            final_question = self._render_prompt(
+                settings.TOOL_PROMPT_LOOKUP_FORMULA,
+                formula_hint=formula_hint,
+            )
         if not final_question:
-            final_question = "Properly mention all the equations in the pdf"
+            final_question = settings.TOOL_PROMPT_LOOKUP_FORMULA_ALL
         return self.answer_query(final_question)
 
     def lookup_metric(self, model_name: str, metric_name: str) -> dict[str, Any]:
-        return self.answer_query(
-            f"What is the {metric_name} score of {model_name} model"
+        prompt = self._render_prompt(
+            settings.TOOL_PROMPT_LOOKUP_METRIC,
+            model_name=model_name,
+            metric_name=metric_name,
         )
+        return self.answer_query(prompt)
 
     def stats(self) -> dict[str, Any]:
         observation = (
@@ -317,3 +341,96 @@ class ToolRegistry:
         if "stats" in result:
             return str(result.get("stats", {}))
         return "Tool completed."
+
+    def _normalize_tool_input(
+        self,
+        name: str,
+        tool_input: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        canonical_name = self._tool_alias(name)
+        payload = dict(tool_input or {})
+
+        if canonical_name in {"answer_query", "answer_from_retrieval", "search_docs", "lookup_formula"}:
+            query_value = self._pick_first(payload, ["question", "query", "user_query", "prompt", "goal", "request"])
+            if query_value:
+                key = "query" if canonical_name == "search_docs" else "question"
+                return canonical_name, {key: str(query_value)}
+
+        if canonical_name == "lookup_metric":
+            model_name = self._pick_first(payload, ["model_name", "model", "regressor", "algorithm"])
+            metric_name = self._pick_first(payload, ["metric_name", "metric", "score_name"])
+            normalized = {}
+            if model_name:
+                normalized["model_name"] = str(model_name)
+            if metric_name:
+                normalized["metric_name"] = str(metric_name)
+            return canonical_name, normalized
+
+        if canonical_name == "explain_figure":
+            number = self._extract_first_number(payload, ["figure_number", "figure", "number", "id"])
+            return canonical_name, {"figure_number": number} if number is not None else {}
+
+        if canonical_name == "lookup_table":
+            number = self._extract_first_number(payload, ["table_number", "table", "number", "id"])
+            return canonical_name, {"table_number": number} if number is not None else {}
+
+        if canonical_name == "compare_figures":
+            left = self._extract_first_number(payload, ["left_figure", "left", "figure_a", "a"])
+            right = self._extract_first_number(payload, ["right_figure", "right", "figure_b", "b"])
+            return canonical_name, self._pair_payload("left_figure", left, "right_figure", right)
+
+        if canonical_name == "compare_tables":
+            left = self._extract_first_number(payload, ["left_table", "left", "table_a", "a"])
+            right = self._extract_first_number(payload, ["right_table", "right", "table_b", "b"])
+            return canonical_name, self._pair_payload("left_table", left, "right_table", right)
+
+        return canonical_name, payload
+
+    @staticmethod
+    def _tool_alias(name: str) -> str:
+        aliases = {
+            "summary": "summarize_document",
+            "summarise_document": "summarize_document",
+            "summarize": "summarize_document",
+            "figure": "explain_figure",
+            "table": "lookup_table",
+            "formula": "lookup_formula",
+            "metric": "lookup_metric",
+            "qa": "answer_query",
+        }
+        lowered = (name or "").strip().lower()
+        return aliases.get(lowered, lowered)
+
+    @staticmethod
+    def _pick_first(payload: dict[str, Any], keys: list[str]) -> Any:
+        for key in keys:
+            value = payload.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    @classmethod
+    def _extract_first_number(cls, payload: dict[str, Any], keys: list[str]) -> int | None:
+        value = cls._pick_first(payload, keys)
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        match = re.search(r"\d+", str(value))
+        return int(match.group(0)) if match else None
+
+    @staticmethod
+    def _pair_payload(left_key: str, left: int | None, right_key: str, right: int | None) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        if left is not None:
+            normalized[left_key] = left
+        if right is not None:
+            normalized[right_key] = right
+        return normalized
+
+    @staticmethod
+    def _render_prompt(template: str, **kwargs: Any) -> str:
+        try:
+            return template.format(**kwargs)
+        except Exception:
+            return template

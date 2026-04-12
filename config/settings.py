@@ -68,6 +68,23 @@ class Settings(BaseSettings):
 
     AGENT_MAX_STEPS: int = 5
     AGENT_MEMORY_DIR: str = "./agent_sessions"
+    AUTO_ROUTE_QUERIES: bool = True
+    TOOL_PROMPT_SUMMARIZE_DOCUMENT: str = "Summary of pdf"
+    TOOL_PROMPT_EXPLAIN_FIGURE: str = "Kindly explain Figure {figure_number} properly"
+    TOOL_PROMPT_COMPARE_FIGURES: str = (
+        "What is the difference between Figure {left_figure} and Figure {right_figure}?"
+    )
+    TOOL_PROMPT_LOOKUP_TABLE: str = (
+        "Explain Table {table_number} briefly and state its contents."
+    )
+    TOOL_PROMPT_COMPARE_TABLES: str = (
+        "What is the difference between Table {left_table} and Table {right_table}?"
+    )
+    TOOL_PROMPT_LOOKUP_FORMULA: str = "mention the {formula_hint} equation"
+    TOOL_PROMPT_LOOKUP_FORMULA_ALL: str = "Properly mention all the equations in the pdf"
+    TOOL_PROMPT_LOOKUP_METRIC: str = (
+        "What is the {metric_name} score of {model_name} model"
+    )
 
     class Config:
         extra = "ignore"
