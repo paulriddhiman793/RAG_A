@@ -1,0 +1,46 @@
+{
+  "session_id": "default",
+  "created_at": "2026-04-12T19:06:53.006538+00:00",
+  "updated_at": "2026-04-12T19:08:15.232823+00:00",
+  "history": [
+    {
+      "kind": "user",
+      "timestamp": "2026-04-12T19:06:53.006538+00:00",
+      "content": "what is the pdf about"
+    },
+    {
+      "kind": "tool",
+      "timestamp": "2026-04-12T19:07:00.384450+00:00",
+      "thought": "Use the general QA tool.",
+      "tool_name": "answer_query",
+      "tool_input": {},
+      "observation": "Invalid tool input for answer_query: ToolRegistry.answer_query() missing 1 required positional argument: 'question'"
+    },
+    {
+      "kind": "tool",
+      "timestamp": "2026-04-12T19:07:07.302649+00:00",
+      "thought": "Use the general QA tool.",
+      "tool_name": "answer_query",
+      "tool_input": {},
+      "observation": "Invalid tool input for answer_query: ToolRegistry.answer_query() missing 1 required positional argument: 'question'"
+    },
+    {
+      "kind": "tool",
+      "timestamp": "2026-04-12T19:07:14.479099+00:00",
+      "thought": "Use the general QA tool.",
+      "tool_name": "answer_query",
+      "tool_input": {},
+      "observation": "Invalid tool input for answer_query: ToolRegistry.answer_query() missing 1 required positional argument: 'question'"
+    },
+    {
+      "kind": "assistant",
+      "timestamp": "2026-04-12T19:07:14.489100+00:00",
+      "content": "Invalid tool input for answer_query: ToolRegistry.answer_query() missing 1 required positional argument: 'question'"
+    },
+    {
+      "kind": "user",
+      "timestamp": "2026-04-12T19:08:15.232823+00:00",
+      "content": "what is the pdf about"
+    }
+  ]
+}

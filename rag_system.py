@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from agent import AgentLoop, AgentMemoryStore, ToolRegistry
 from config import settings
 from generation.llm_client import LLMClient
 from indexing.vector_store import VectorStore
@@ -39,6 +40,18 @@ class RAGSystem:
         self.llm = LLMClient()
         self.vector_store = VectorStore()
         self.bm25 = BM25Index()
+        self.memory_store = AgentMemoryStore()
+        self.tool_registry = ToolRegistry(
+            vector_store=self.vector_store,
+            bm25_index=self.bm25,
+            llm_client=self.llm,
+            domain=self.domain,
+        )
+        self.agent = AgentLoop(
+            tool_registry=self.tool_registry,
+            llm_client=self.llm,
+            memory_store=self.memory_store,
+        )
 
         # Try to load cached BM25 index
         if not self.bm25.load():
@@ -120,12 +133,32 @@ class RAGSystem:
         result = self.query(question)
         return result["answer"]
 
+    def agent_query(
+        self,
+        question: str,
+        session_id: str = "default",
+        max_steps: int | None = None,
+    ) -> dict[str, Any]:
+        """Run the agentic planner/tool loop for a question."""
+        return self.agent.run(question, session_id=session_id, max_steps=max_steps)
+
+    def run_tool(self, name: str, tool_input: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute an explicit tool from the tool registry."""
+        return self.tool_registry.run_tool(name, tool_input or {})
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        """List explicit agent tools available in the current setup."""
+        return self.tool_registry.list_tools()
+
     def stats(self) -> dict[str, Any]:
         """Return system statistics."""
         return {
             "chunks_indexed": self.vector_store.count(),
             "llm_provider": "groq",
             "llm_model": settings.LLM_MODEL,
+            "vision_model": settings.VISION_MODEL,
             "embedding_model": settings.DEFAULT_EMBEDDING_MODEL,
             "domain": self.domain or "auto",
+            "agent_max_steps": settings.AGENT_MAX_STEPS,
+            "tools_available": len(self.tool_registry.list_tools()),
         }

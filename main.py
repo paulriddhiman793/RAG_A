@@ -117,6 +117,46 @@ def cmd_query(args, rag: RAGSystem) -> None:
     )
 
 
+def cmd_agent_query(args, rag: RAGSystem) -> None:
+    question = args.question
+    console.print(f"\n[bold]Agent Question:[/bold] {question}\n")
+
+    with console.status("[bold cyan]Planning, using tools, and answering..."):
+        result = rag.agent_query(
+            question,
+            session_id=args.session,
+            max_steps=args.max_steps,
+        )
+
+    answer_panel = Panel(
+        Markdown(result["answer"]),
+        title="[bold cyan]Agent Answer",
+        border_style="cyan",
+    )
+    console.print(answer_panel)
+
+    if args.show_trace and result.get("steps"):
+        t = Table(title=f"Agent Trace | session={result['session_id']}", show_header=True)
+        t.add_column("Step", width=4)
+        t.add_column("Tool")
+        t.add_column("Thought")
+        t.add_column("Observation")
+        for step in result["steps"]:
+            t.add_row(
+                str(step.get("step", "")),
+                step.get("tool_name", ""),
+                str(step.get("thought", ""))[:80],
+                str(step.get("observation", ""))[:120],
+            )
+        console.print(t)
+
+    console.print(
+        f"\n[dim]Session: {result['session_id']} | "
+        f"Steps: {len(result.get('steps', []))} | "
+        f"Halt reason: {result.get('halt_reason', 'unknown')}[/dim]"
+    )
+
+
 def cmd_interactive(rag: RAGSystem) -> None:
     console.print(Panel(
         "[bold green]Advanced RAG — Interactive Mode[/bold green]\n"
@@ -138,6 +178,30 @@ def cmd_interactive(rag: RAGSystem) -> None:
         cmd_query(args_mock, rag)
 
 
+def cmd_agent_interactive(args, rag: RAGSystem) -> None:
+    console.print(Panel(
+        "[bold cyan]Advanced RAG Agent - Interactive Mode[/bold cyan]\n"
+        "Type your question and press Enter. Type 'exit' to quit.",
+        border_style="cyan",
+    ))
+    while True:
+        try:
+            question = input("\nAgent> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if not question:
+            continue
+        if question.lower() in ("exit", "quit", "q"):
+            break
+        args_mock = argparse.Namespace(
+            question=question,
+            session=args.session,
+            max_steps=args.max_steps,
+            show_trace=args.show_trace,
+        )
+        cmd_agent_query(args_mock, rag)
+
+
 def cmd_stats(rag: RAGSystem) -> None:
     stats = rag.stats()
     t = Table(title="RAG System Stats")
@@ -146,6 +210,39 @@ def cmd_stats(rag: RAGSystem) -> None:
     for k, v in stats.items():
         t.add_row(k, str(v))
     console.print(t)
+
+
+def cmd_tools(rag: RAGSystem) -> None:
+    tools = rag.list_tools()
+    t = Table(title="Available Agent Tools")
+    t.add_column("Tool")
+    t.add_column("Description")
+    t.add_column("Input Schema")
+    for tool in tools:
+        t.add_row(
+            tool["name"],
+            tool["description"],
+            json.dumps(tool["input_schema"]),
+        )
+    console.print(t)
+
+
+def cmd_tool(args, rag: RAGSystem) -> None:
+    try:
+        payload = json.loads(args.input) if args.input else {}
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Invalid JSON for --input:[/red] {e}")
+        sys.exit(1)
+
+    result = rag.run_tool(args.name, payload)
+    panel = Panel(
+        Markdown(str(result.get("observation", result))),
+        title=f"[bold magenta]Tool Result: {args.name}",
+        border_style="magenta",
+    )
+    console.print(panel)
+    if args.show_json:
+        console.print_json(json.dumps(result))
 
 
 def _print_ingest_result(result: dict) -> None:
@@ -174,11 +271,38 @@ def main() -> None:
     p_query.add_argument("--verbose", action="store_true",
                          help="Show expanded queries and retrieval details")
 
+    # agent-query
+    p_agent_query = sub.add_parser("agent-query", help="Ask a question via the agent loop")
+    p_agent_query.add_argument("question", help="Question to ask")
+    p_agent_query.add_argument("--session", default="default", help="Session ID for agent memory")
+    p_agent_query.add_argument("--max-steps", type=int, default=None,
+                               help="Maximum planning/execution steps")
+    p_agent_query.add_argument("--show-trace", action="store_true",
+                               help="Show tool-by-tool reasoning trace")
+
     # interactive
     sub.add_parser("interactive", help="Interactive question-answering mode")
 
+    # agent interactive
+    p_agent_interactive = sub.add_parser("agent-interactive", help="Interactive agent mode")
+    p_agent_interactive.add_argument("--session", default="default",
+                                     help="Session ID for agent memory")
+    p_agent_interactive.add_argument("--max-steps", type=int, default=None,
+                                     help="Maximum planning/execution steps")
+    p_agent_interactive.add_argument("--show-trace", action="store_true",
+                                     help="Show tool-by-tool reasoning trace")
+
     # stats
     sub.add_parser("stats", help="Show system statistics")
+
+    # tools
+    sub.add_parser("tools", help="List available agent tools")
+
+    # tool execution
+    p_tool = sub.add_parser("tool", help="Execute one explicit agent tool")
+    p_tool.add_argument("name", help="Tool name")
+    p_tool.add_argument("--input", default="{}", help="JSON object for tool input")
+    p_tool.add_argument("--show-json", action="store_true", help="Print full JSON result")
 
     args = parser.parse_args()
 
@@ -192,10 +316,18 @@ def main() -> None:
         cmd_ingest(args, rag)
     elif args.command == "query":
         cmd_query(args, rag)
+    elif args.command == "agent-query":
+        cmd_agent_query(args, rag)
     elif args.command == "interactive":
         cmd_interactive(rag)
+    elif args.command == "agent-interactive":
+        cmd_agent_interactive(args, rag)
     elif args.command == "stats":
         cmd_stats(rag)
+    elif args.command == "tools":
+        cmd_tools(rag)
+    elif args.command == "tool":
+        cmd_tool(args, rag)
 
 
 if __name__ == "__main__":

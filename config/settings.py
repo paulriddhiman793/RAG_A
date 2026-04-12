@@ -66,6 +66,9 @@ class Settings(BaseSettings):
         "you are now",
     ]
 
+    AGENT_MAX_STEPS: int = 5
+    AGENT_MEMORY_DIR: str = "./agent_sessions"
+
     class Config:
         extra = "ignore"
         env_file = ".env"
