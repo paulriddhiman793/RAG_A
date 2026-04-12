@@ -16,6 +16,9 @@ envcf/
 
 # Local indexes, caches, and model artifacts
 chroma_db/
+chroma_db_backup/
+*.sqlite3
+*.bin
 bm25_index.pkl
 bm25_index.json
 version_registry.json
