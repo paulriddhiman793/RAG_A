@@ -166,25 +166,25 @@ sequenceDiagram
     participant User
     participant CLI as main.py
     participant RAG as RAGSystem
-    participant LOOP as AgentLoop
-    participant PLAN as Planner
-    participant TOOLS as ToolRegistry
-    participant MEM as AgentMemory
+    participant AGENT as AgentLoop
+    participant PLANNER as Planner
+    participant TOOLSVC as ToolRegistry
+    participant MEMORY as AgentMemory
 
     User->>CLI: python main.py agent-query "..."
     CLI->>RAG: rag.agent_query(...)
-    RAG->>LOOP: run(...)
-    LOOP->>MEM: load session context
-    LOOP->>PLAN: plan_next_action(...)
-    PLAN-->>LOOP: JSON decision
+    RAG->>AGENT: run(...)
+    AGENT->>MEMORY: load session context
+    AGENT->>PLANNER: plan_next_action(...)
+    PLANNER-->>AGENT: JSON decision
     alt done = false
-        LOOP->>TOOLS: run_tool(...)
-        TOOLS-->>LOOP: observation
-        LOOP->>MEM: persist observation
-        LOOP->>PLAN: replan with updated context
+        AGENT->>TOOLSVC: run_tool(...)
+        TOOLSVC-->>AGENT: observation
+        AGENT->>MEMORY: persist observation
+        AGENT->>PLANNER: replan with updated context
     else done = true
-        LOOP->>MEM: persist final answer
-        LOOP-->>CLI: answer + step trace
+        AGENT->>MEMORY: persist final answer
+        AGENT-->>CLI: answer + step trace
     end
 ```
 
