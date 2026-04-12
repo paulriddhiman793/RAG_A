@@ -96,28 +96,28 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[User Goal] --> B[CLI Agent Command]
-    B --> C[RAGSystem.agent_query]
-    C --> D[Agent Loop]
+    A["User Goal"] --> B["CLI Agent Command"]
+    B --> C["RAGSystem agent_query"]
+    C --> D["Agent Loop"]
 
-    D --> E[Session Memory<br/>recent user turns + tool observations]
-    D --> F[Planner<br/>complete_json()]
+    D --> E["Session Memory<br/>recent user turns + tool observations"]
+    D --> F["Planner<br/>complete_json"]
     F --> G{Decision}
 
-    G -->|done=true| H[Return Final Answer]
-    G -->|done=false| I[Tool Registry]
+    G -->|done=true| H["Return Final Answer"]
+    G -->|done=false| I["Tool Registry"]
 
-    I --> J[search_docs]
-    I --> K[answer_query]
-    I --> L[summarize_document]
-    I --> M[explain_figure]
-    I --> N[compare_figures]
-    I --> O[lookup_table / compare_tables]
-    I --> P[lookup_formula]
-    I --> Q[lookup_metric]
-    I --> R[stats]
+    I --> J["search_docs"]
+    I --> K["answer_query"]
+    I --> L["summarize_document"]
+    I --> M["explain_figure"]
+    I --> N["compare_figures"]
+    I --> O["lookup_table + compare_tables"]
+    I --> P["lookup_formula"]
+    I --> Q["lookup_metric"]
+    I --> R["stats"]
 
-    J --> S[Observation]
+    J --> S["Observation"]
     K --> S
     L --> S
     M --> S
