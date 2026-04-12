@@ -17,7 +17,6 @@ rank-bm25
 groq
 
 # ── NLP utilities ────────────────────────────────────────────────────
-spacy
 langdetect
 lingua-language-detector
 
@@ -30,7 +29,6 @@ fastcoref
 # ── Config & validation ───────────────────────────────────────────────
 pydantic
 pydantic-settings
-python-dotenv
 
 # ── Utilities ────────────────────────────────────────────────────────
 numpy

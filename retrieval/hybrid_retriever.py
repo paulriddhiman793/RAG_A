@@ -23,6 +23,11 @@ from indexing.vector_store import VectorStore
 from indexing.bm25_index import BM25Index
 from indexing.embeddings import embed_query
 from ingestion.versioning import apply_recency_boost
+from utils.intent import (
+    has_figure_intent as _has_figure_intent,
+    has_formula_intent as _has_formula_intent,
+    has_table_intent as _has_table_intent,
+)
 from utils.logger import logger
 
 
@@ -327,27 +332,7 @@ def _ensure_query_type_presence(query: str, chunks: list[dict], window: int) -> 
     return head + tail
 
 
-def _has_formula_intent(query: str) -> bool:
-    q = (query or "").lower()
-    return any(term in q for term in [
-        "equation", "equations", "formula", "formulas", "latex", "loss function"
-    ])
 
-
-def _has_table_intent(query: str) -> bool:
-    q = (query or "").lower()
-    return any(term in q for term in [
-        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse",
-        "r-squared", "r2", "r^2", "mae", "score"
-    ])
-
-
-def _has_figure_intent(query: str) -> bool:
-    q = (query or "").lower()
-    return any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "plots",
-        "chart", "charts", "graph", "graphs", "heatmap", "visual"
-    ])
 
 
 def _order_for_context(chunks: list[dict]) -> list[dict]:

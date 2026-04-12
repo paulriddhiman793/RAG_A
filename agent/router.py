@@ -4,6 +4,8 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from utils import intent as _intent
+
 
 @dataclass
 class RouteDecision:
@@ -131,32 +133,23 @@ class QueryRouter:
 
     @staticmethod
     def _has_summary_intent(lowered: str) -> bool:
-        return any(term in lowered for term in [
-            "summary", "summarize", "summarise", "overview", "what is the pdf about",
-            "what is this pdf about", "what is the document about", "gist",
-        ])
+        return _intent.has_summary_intent(lowered)
 
     @staticmethod
     def _has_figure_intent(lowered: str) -> bool:
-        return any(term in lowered for term in [
-            "figure", "fig.", "graph", "chart", "plot", "image", "diagram",
-        ])
+        return _intent.has_figure_intent(lowered)
 
     @staticmethod
     def _has_table_intent(lowered: str) -> bool:
-        return "table" in lowered
+        return _intent.has_table_intent(lowered)
 
     @staticmethod
     def _has_formula_intent(lowered: str) -> bool:
-        return any(term in lowered for term in [
-            "formula", "equation", "latex", "loss function",
-        ])
+        return _intent.has_formula_intent(lowered)
 
     @staticmethod
     def _has_metric_intent(lowered: str) -> bool:
-        return any(term in lowered for term in [
-            "r2", "r-squared", "r squared", "rmse", "mae", "mse", "score",
-        ])
+        return _intent.has_table_intent(lowered)  # metric terms overlap with table intent
 
     @staticmethod
     def _extract_numbers_for_label(lowered: str, label_pattern: str) -> list[int]:

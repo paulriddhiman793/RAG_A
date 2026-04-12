@@ -14,15 +14,17 @@ from pipeline.query_pipeline import (
     _ensure_formula_context,
     _ensure_metric_context,
     _ensure_summary_context,
-    _has_figure_intent,
-    _has_formula_intent,
-    _has_metric_lookup_intent,
-    _has_summary_intent,
     query as run_query_pipeline,
 )
 from retrieval.context_compressor import compress_context
 from retrieval.hybrid_retriever import retrieve
 from retrieval.query_expander import expand_query
+from utils.intent import (
+    has_figure_intent as _has_figure_intent,
+    has_formula_intent as _has_formula_intent,
+    has_metric_lookup_intent as _has_metric_lookup_intent,
+    has_summary_intent as _has_summary_intent,
+)
 from utils.logger import logger
 
 

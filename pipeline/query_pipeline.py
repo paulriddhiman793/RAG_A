@@ -25,6 +25,13 @@ from config import settings
 from indexing.vector_store import VectorStore
 from indexing.bm25_index import BM25Index
 from indexing.embeddings import detect_domain
+from utils.intent import (
+    has_figure_intent as _has_figure_intent,
+    has_formula_intent as _has_formula_intent,
+    has_metric_lookup_intent as _has_metric_lookup_intent,
+    has_summary_intent as _has_summary_intent,
+    looks_table_like_image as _looks_table_like_image,
+)
 from utils.logger import logger
 
 
@@ -181,13 +188,6 @@ def _blocked_response(user_query: str, reason: str) -> dict[str, Any]:
     }
 
 
-def _has_formula_intent(query: str) -> bool:
-    q = (query or "").lower()
-    return any(term in q for term in [
-        "equation", "equations", "formula", "formulas", "latex", "loss function"
-    ])
-
-
 def _ensure_formula_context(
     chunks: list[dict[str, Any]],
     vector_store: VectorStore,
@@ -226,36 +226,6 @@ def _ensure_formula_context(
         f"Formula-intent fallback injected {len(injected)} formula chunk(s) into context"
     )
     return injected + chunks
-
-
-def _has_figure_intent(query: str) -> bool:
-    q = (query or "").lower()
-    return any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "plots",
-        "chart", "charts", "graph", "graphs", "heatmap", "visual"
-    ])
-
-
-def _has_summary_intent(query: str) -> bool:
-    q = (query or "").lower().strip()
-    return any(term in q for term in [
-        "summary", "summarize", "summarise", "overview", "gist", "what is this pdf about",
-        "what is this document about", "what is the pdf about", "what is the document about",
-        "what is pdf about", "explain this pdf", "explain this document"
-    ])
-
-
-def _has_metric_lookup_intent(query: str) -> bool:
-    q = (query or "").lower()
-    metric_terms = [
-        "r2", "r^2", "r-squared", "r squared", "rmse", "mae", "mse",
-        "score", "cv r2", "test r2", "train r2",
-    ]
-    model_terms = [
-        "random forest", "randomforest", "regressor", "xgboost", "ridge",
-        "lasso", "linear regression", "mlr", "stacking", "ensemble", "poly",
-    ]
-    return any(t in q for t in metric_terms) and any(t in q for t in model_terms)
 
 
 def _ensure_figure_context(
@@ -412,11 +382,4 @@ def _ensure_metric_context(
     return injected + chunks, max(top_score, injected[0].get("score", top_score))
 
 
-def _looks_table_like_image(chunk: dict[str, Any]) -> bool:
-    meta = chunk.get("metadata", {})
-    text = " ".join([
-        str(meta.get("caption", "")),
-        str(meta.get("alt_text", "")),
-        str(chunk.get("text", "")),
-    ]).strip().lower()
-    return text.startswith("table ") or text.startswith("table:") or "table 2" in text[:40]
+# _looks_table_like_image is imported from utils.intent

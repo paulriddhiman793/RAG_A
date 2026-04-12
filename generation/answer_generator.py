@@ -13,6 +13,7 @@ from generation.llm_client import LLMClient
 from generation.hallucination_guard import verify_response
 from generation.security import scan_output
 from retrieval.context_compressor import build_context_string
+from utils.intent import looks_table_like_visual as _looks_table_like_visual
 from utils.logger import logger
 
 
@@ -419,11 +420,16 @@ def _maybe_answer_figure_query(
 
             if support_summary:
                 ref_bits = ref if not support_refs else f"{ref}, {support_refs}"
+                # Build a concise summary from actual supporting text instead of
+                # hardcoded domain-specific language.
+                first_support = support_lines[0] if (support_lines := [
+                    c['text'] for c in support_chunks
+                    if c.get('source_num') != target['source_num'] and c.get('text')
+                ]) else ""
+                detail = first_support[:200] if first_support else "related document content"
                 return (
                     f"Figure {requested_num} presents {caption.lower()} {ref}. "
-                    f"The nearby text explains that the proposed model combines CNN encoders, "
-                    f"ConvLSTM recurrence, deformable attention, a decoder, and a customized loss "
-                    f"function in this framework {ref_bits}."
+                    f"The surrounding text describes: {detail} {ref_bits}."
                 )
             return f"Figure {requested_num} is captioned as {caption} {ref}."
 
@@ -657,9 +663,7 @@ def _compare_requested_figures(
     )
 
 
-def _looks_table_like_visual(caption: str, alt_text: str, text: str) -> bool:
-    sample = " ".join([caption, alt_text, text]).strip().lower()
-    return sample.startswith("table ") or sample.startswith("table:") or "table 2" in sample[:40]
+# _looks_table_like_visual is imported from utils.intent
 
 
 def _render_page_image(source_file: str, page_number: Any) -> str:
