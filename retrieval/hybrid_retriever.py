@@ -337,14 +337,16 @@ def _has_formula_intent(query: str) -> bool:
 def _has_table_intent(query: str) -> bool:
     q = (query or "").lower()
     return any(term in q for term in [
-        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse", "r-squared"
+        "table", "metric", "metrics", "value", "values", "ssim", "mse", "rmse",
+        "r-squared", "r2", "r^2", "mae", "score"
     ])
 
 
 def _has_figure_intent(query: str) -> bool:
     q = (query or "").lower()
     return any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+        "figure", "figures", "image", "images", "diagram", "plot", "plots",
+        "chart", "charts", "graph", "graphs", "heatmap", "visual"
     ])
 
 

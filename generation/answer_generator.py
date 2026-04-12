@@ -84,6 +84,16 @@ def generate_answer(
             "no_answer": False,
         }
 
+    summary_answer = _maybe_answer_summary_query(query, chunks, llm_client)
+    if summary_answer is not None:
+        return {
+            "answer": summary_answer,
+            "is_grounded": True,
+            "flagged_claims": [],
+            "sources_used": _summarise_sources(chunks),
+            "no_answer": False,
+        }
+
     figure_answer = _maybe_answer_figure_query(query, chunks, llm_client)
     if figure_answer is not None:
         return {
@@ -175,8 +185,41 @@ def _extract_image_chunks(chunks: list[dict]) -> list[dict]:
 def _should_include_images(query: str) -> bool:
     q = (query or "").lower()
     return any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+        "figure", "figures", "image", "images", "diagram", "plot", "plots",
+        "chart", "charts", "graph", "graphs", "heatmap", "visual"
     ])
+
+
+def _maybe_answer_summary_query(
+    query: str,
+    chunks: list[dict[str, Any]],
+    llm_client: LLMClient,
+) -> str | None:
+    q = (query or "").lower().strip()
+    if not any(term in q for term in [
+        "summary", "summarize", "summarise", "overview", "gist",
+        "what is this pdf about", "what is this document about",
+        "explain this pdf", "explain this document",
+    ]):
+        return None
+
+    context = build_context_string(chunks)
+    prompt = (
+        f"Sources:\n\n{context}\n\n"
+        "---\n\n"
+        "Question: Provide a concise but well-structured summary of the document. "
+        "Cover the main objective, methodology, important results, and conclusion. "
+        "Cite every factual claim with [Source N]."
+    )
+    try:
+        return llm_client.complete(
+            prompt,
+            system=SYSTEM_PROMPT,
+            max_tokens=settings_max_tokens(),
+        ).strip()
+    except Exception as e:
+        logger.warning(f"Summary generation failed: {e}")
+        return None
 
 
 def _maybe_answer_formula_query(query: str, chunks: list[dict[str, Any]]) -> str | None:
@@ -277,7 +320,8 @@ def _maybe_answer_figure_query(
 ) -> str | None:
     q = (query or "").lower()
     if not any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+        "figure", "figures", "image", "images", "diagram", "plot", "plots",
+        "chart", "charts", "graph", "graphs", "heatmap", "visual"
     ]):
         return None
 
@@ -397,7 +441,44 @@ def _maybe_answer_figure_query(
             f"on pages {pages} {refs}."
         )
 
-    if any(term in q for term in ["all figures", "list", "which figures"]):
+    if any(term in q for term in [
+        "all figures", "all graphs", "all charts", "all plots",
+        "list", "which figures", "explain all the graphs", "explain all graphs"
+    ]):
+        if llm_client is not None:
+            selected = figure_entries[: min(4, len(figure_entries))]
+            image_payloads = []
+            for entry in selected:
+                image_payload = entry.get("image_base64") or _render_page_image(
+                    entry.get("source_file", ""),
+                    entry.get("page"),
+                )
+                if image_payload:
+                    image_payloads.append(image_payload)
+            composite = _compose_images_side_by_side(image_payloads) if len(image_payloads) >= 2 else (image_payloads[0] if image_payloads else "")
+            if composite:
+                figure_lines = []
+                for entry in selected:
+                    ref = f"[Source {entry['source_num']}]"
+                    label = entry["label"] or f"Figure on page {entry['page']}"
+                    caption = entry["caption"] or entry["alt_text"] or "No caption available"
+                    figure_lines.append(f"{label}: {caption} {ref}")
+                prompt = (
+                    "Explain the figures shown in the combined image using only the provided captions and visual evidence.\n"
+                    "Give a compact summary of each graph/figure and mention how they differ where helpful.\n"
+                    "Cite every factual claim with [Source N].\n\n"
+                    + "\n".join(figure_lines)
+                )
+                try:
+                    return llm_client.complete_vision(
+                        text=prompt,
+                        image_base64=composite,
+                        image_mime_type="image/png",
+                        max_tokens=settings_max_tokens(),
+                    ).strip()
+                except Exception as e:
+                    logger.warning(f"All-figures vision summary failed: {e}")
+
         parts = []
         for entry in figure_entries:
             ref = f"[Source {entry['source_num']}]"

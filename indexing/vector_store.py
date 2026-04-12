@@ -201,6 +201,32 @@ class VectorStore:
             logger.warning(f"get_all_chunks failed: {e}")
             return []
 
+    def get_all_parent_chunks(self) -> list[dict[str, Any]]:
+        """Return all stored parent chunks for summary-style query fallbacks."""
+        try:
+            r = self._parent_col.get(
+                include=["documents", "metadatas"],
+            )
+            out = []
+            for cid, doc, meta in zip(
+                r.get("ids", []),
+                r.get("documents", []),
+                r.get("metadatas", []),
+            ):
+                restored = restore_metadata(meta)
+                if restored.get("is_deprecated", False):
+                    continue
+                out.append({
+                    "chunk_id": cid,
+                    "text": doc,
+                    "metadata": restored,
+                    "score": 0.0,
+                })
+            return out
+        except Exception as e:
+            logger.warning(f"get_all_parent_chunks failed: {e}")
+            return []
+
     def count(self) -> int:
         return self._col.count()
 

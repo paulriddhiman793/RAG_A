@@ -104,6 +104,19 @@ def query(
             user_query,
             top_score,
         )
+    if _has_metric_lookup_intent(user_query):
+        retrieved_chunks, top_score = _ensure_metric_context(
+            retrieved_chunks,
+            vector_store,
+            user_query,
+            top_score,
+        )
+    if _has_summary_intent(user_query):
+        retrieved_chunks, top_score = _ensure_summary_context(
+            retrieved_chunks,
+            vector_store,
+            top_score,
+        )
 
     if verbose:
         logger.info(f"Retrieved {len(retrieved_chunks)} chunks, top score: {top_score:.3f}")
@@ -218,8 +231,31 @@ def _ensure_formula_context(
 def _has_figure_intent(query: str) -> bool:
     q = (query or "").lower()
     return any(term in q for term in [
-        "figure", "figures", "image", "images", "diagram", "plot", "chart", "heatmap", "visual"
+        "figure", "figures", "image", "images", "diagram", "plot", "plots",
+        "chart", "charts", "graph", "graphs", "heatmap", "visual"
     ])
+
+
+def _has_summary_intent(query: str) -> bool:
+    q = (query or "").lower().strip()
+    return any(term in q for term in [
+        "summary", "summarize", "summarise", "overview", "gist", "what is this pdf about",
+        "what is this document about", "what is the pdf about", "what is the document about",
+        "what is pdf about", "explain this pdf", "explain this document"
+    ])
+
+
+def _has_metric_lookup_intent(query: str) -> bool:
+    q = (query or "").lower()
+    metric_terms = [
+        "r2", "r^2", "r-squared", "r squared", "rmse", "mae", "mse",
+        "score", "cv r2", "test r2", "train r2",
+    ]
+    model_terms = [
+        "random forest", "randomforest", "regressor", "xgboost", "ridge",
+        "lasso", "linear regression", "mlr", "stacking", "ensemble", "poly",
+    ]
+    return any(t in q for t in metric_terms) and any(t in q for t in model_terms)
 
 
 def _ensure_figure_context(
@@ -229,7 +265,10 @@ def _ensure_figure_context(
     top_score: float,
 ) -> tuple[list[dict[str, Any]], float]:
     q = (query or "").lower()
-    wants_all = any(term in q for term in ["how many", "count", "number of", "all figures", "list"])
+    wants_all = any(term in q for term in [
+        "how many", "count", "number of", "all figures", "all graphs",
+        "all charts", "all plots", "list"
+    ])
 
     current_figure_chunks = [
         c for c in chunks
@@ -270,6 +309,105 @@ def _ensure_figure_context(
 
     logger.info(
         f"Figure-intent fallback injected {len(injected)} image chunk(s) into context"
+    )
+    return injected + chunks, max(top_score, injected[0].get("score", top_score))
+
+
+def _ensure_summary_context(
+    chunks: list[dict[str, Any]],
+    vector_store: VectorStore,
+    top_score: float,
+) -> tuple[list[dict[str, Any]], float]:
+    parent_chunks = vector_store.get_all_parent_chunks()
+    if not parent_chunks:
+        fallback_children = vector_store.get_all_chunks()
+        if not fallback_children:
+            return chunks, top_score
+        fallback_children.sort(
+            key=lambda c: (
+                c.get("metadata", {}).get("page_number", 0),
+                c.get("metadata", {}).get("reading_order", 0),
+            )
+        )
+        parent_chunks = fallback_children[:8]
+
+    parent_chunks.sort(
+        key=lambda c: (
+            c.get("metadata", {}).get("page_number", 0),
+            c.get("metadata", {}).get("reading_order", 0),
+        )
+    )
+
+    existing_ids = {c.get("chunk_id") for c in chunks}
+    injected = []
+    for chunk in parent_chunks:
+        if chunk.get("chunk_id") in existing_ids:
+            continue
+        copy = dict(chunk)
+        copy["score"] = max(copy.get("score", 0.0), 0.92)
+        injected.append(copy)
+
+    if not injected:
+        return chunks, max(top_score, 0.92 if chunks else top_score)
+
+    logger.info(
+        f"Summary-intent fallback injected {len(injected)} parent chunk(s) into context"
+    )
+    return injected + chunks, max(top_score, injected[0].get("score", top_score))
+
+
+def _ensure_metric_context(
+    chunks: list[dict[str, Any]],
+    vector_store: VectorStore,
+    query: str,
+    top_score: float,
+) -> tuple[list[dict[str, Any]], float]:
+    q = (query or "").lower()
+    all_chunks = vector_store.get_all_chunks()
+    if not all_chunks:
+        return chunks, top_score
+
+    metric_terms = [t for t in ["r2", "r-squared", "rmse", "mae", "mse", "score"] if t in q]
+    model_terms = [t for t in [
+        "random forest", "randomforest", "regressor", "xgboost", "ridge",
+        "lasso", "linear regression", "mlr", "stacking", "ensemble", "poly",
+    ] if t in q]
+
+    ranked = []
+    for chunk in all_chunks:
+        meta = chunk.get("metadata", {})
+        blob = " ".join([
+            str(chunk.get("text", "")),
+            str(meta.get("caption", "")),
+            str(meta.get("alt_text", "")),
+            str(meta.get("section", "")),
+        ]).lower()
+        score = 0
+        for term in metric_terms:
+            if term in blob:
+                score += 2
+        for term in model_terms:
+            if term in blob:
+                score += 3
+        if "r?" in blob and any(term in q for term in ["r2", "r-squared", "score"]):
+            score += 2
+        if score <= 0:
+            continue
+        copy = dict(chunk)
+        copy["score"] = max(copy.get("score", 0.0), min(0.97, 0.55 + (score * 0.06)))
+        ranked.append(copy)
+
+    if not ranked:
+        return chunks, top_score
+
+    ranked.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    existing_ids = {c.get("chunk_id") for c in chunks}
+    injected = [c for c in ranked if c.get("chunk_id") not in existing_ids][:6]
+    if not injected:
+        return chunks, max(top_score, ranked[0].get("score", top_score))
+
+    logger.info(
+        f"Metric-intent fallback injected {len(injected)} chunk(s) into context"
     )
     return injected + chunks, max(top_score, injected[0].get("score", top_score))
 
