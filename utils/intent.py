@@ -43,6 +43,19 @@ def has_summary_intent(query: str) -> bool:
         "what is this pdf about", "what is this document about",
         "what is the pdf about", "what is the document about",
         "what is pdf about", "explain this pdf", "explain this document",
+        "summarize the doc", "summarise the doc", "summarize the pdf",
+        "main finding", "main findings", "key finding", "key findings",
+        "main point", "key points", "key takeaway", "key takeaways",
+        "main takeaway", "main takeaways", "main idea", "main ideas",
+        "tell me about", "what does the doc", "what does the document",
+        "what does the pdf", "what does this doc", "what does this document",
+        "what is it about", "what are the main", "main theme",
+        "main argument", "main conclusion", "key conclusion",
+        "briefly explain", "brief overview", "in a nutshell",
+        "tl;dr", "tldr", "high level", "high-level",
+        "what did the author", "what do the authors",
+        "about the doc", "about the document", "about the pdf",
+        "describe the doc", "describe the document", "describe the pdf",
     ])
 
 

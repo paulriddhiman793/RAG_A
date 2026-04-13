@@ -130,22 +130,34 @@ def query(
 
     # ── Step 5: Relevance threshold ───────────────────────────────────
     if not check_relevance(top_score):
-        logger.info(f"No relevant content found (score={top_score:.3f})")
-        return {
-            "query": user_query,
-            "answer": (
-                "I cannot find relevant information about this in the "
-                "provided documents. The query may be outside the scope "
-                "of the indexed content."
-            ),
-            "is_grounded": True,
-            "no_answer": True,
-            "flagged_claims": [],
-            "sources_used": [],
-            "expanded_queries": all_queries,
-            "top_score": top_score,
-            "chunks_retrieved": 0,
-        }
+        # Before giving up, try a broad-context fallback if we have
+        # indexed content — general questions often score low with the
+        # cross-encoder but can be answered from the full document.
+        if vector_store.count() > 0:
+            logger.info(
+                f"Low relevance score ({top_score:.3f}) but DB has content — "
+                "using broad-context fallback"
+            )
+            retrieved_chunks, top_score = _ensure_summary_context(
+                retrieved_chunks, vector_store, top_score
+            )
+        if not retrieved_chunks:
+            logger.info(f"No relevant content found (score={top_score:.3f})")
+            return {
+                "query": user_query,
+                "answer": (
+                    "I cannot find relevant information about this in the "
+                    "provided documents. The query may be outside the scope "
+                    "of the indexed content."
+                ),
+                "is_grounded": True,
+                "no_answer": True,
+                "flagged_claims": [],
+                "sources_used": [],
+                "expanded_queries": all_queries,
+                "top_score": top_score,
+                "chunks_retrieved": 0,
+            }
 
     # ── Step 6: Injection scan on retrieved content ───────────────────
     safe_chunks = scan_chunks_for_injection(retrieved_chunks)

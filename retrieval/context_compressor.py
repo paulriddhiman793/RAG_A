@@ -175,6 +175,10 @@ def _try_llmlingua(
 
     Each chunk is compressed individually so that per-chunk provenance
     (chunk_id, metadata, source_file) is preserved for citation grounding.
+
+    Long chunks are split into ≤ 450-token segments before compression to
+    avoid exceeding the xlm-roberta model's 512-token sequence limit.
+
     Returns None if LLMLingua is not installed or fails.
     """
     try:
@@ -190,6 +194,9 @@ def _try_llmlingua(
         if current_tokens <= 0:
             return None
 
+        # Max tokens per segment — leave room for special tokens within 512 limit
+        _MAX_SEGMENT_TOKENS = 450
+
         # Per-chunk compression preserving provenance
         compressed: list[dict] = []
         for chunk in chunks:
@@ -203,14 +210,33 @@ def _try_llmlingua(
             chunk_budget = max(20, int(max_tokens * chunk_tokens / current_tokens))
 
             try:
-                result = compressor.compress_prompt(
-                    context=[chunk_text],
-                    instruction="",
-                    question=query,
-                    target_token=chunk_budget,
-                    iterative_size=200,
-                )
-                compressed_text = result.get("compressed_prompt", "")
+                # Split into segments that fit within model's 512-token limit
+                if chunk_tokens > _MAX_SEGMENT_TOKENS:
+                    segments = _split_text_to_segments(chunk_text, _MAX_SEGMENT_TOKENS)
+                    segment_budget = max(10, chunk_budget // len(segments))
+                    compressed_parts = []
+                    for segment in segments:
+                        seg_result = compressor.compress_prompt(
+                            context=[segment],
+                            instruction="",
+                            question=query,
+                            target_token=segment_budget,
+                            iterative_size=200,
+                        )
+                        compressed_parts.append(
+                            seg_result.get("compressed_prompt", segment)
+                        )
+                    compressed_text = " ".join(p for p in compressed_parts if p)
+                else:
+                    result = compressor.compress_prompt(
+                        context=[chunk_text],
+                        instruction="",
+                        question=query,
+                        target_token=chunk_budget,
+                        iterative_size=200,
+                    )
+                    compressed_text = result.get("compressed_prompt", "")
+
                 if compressed_text:
                     compressed.append({
                         **chunk,
@@ -231,6 +257,31 @@ def _try_llmlingua(
     except Exception as e:
         logger.warning(f"LLMLingua compression failed: {e}")
         return None
+
+
+def _split_text_to_segments(text: str, max_tokens: int) -> list[str]:
+    """Split text into segments of at most max_tokens on sentence boundaries."""
+    import re as _re
+
+    sentences = _re.split(r'(?<=[.!?])\s+', text)
+    segments: list[str] = []
+    current: list[str] = []
+    current_count = 0
+
+    for sentence in sentences:
+        sent_tokens = len(_TOKENIZER.encode(sentence))
+        if current_count + sent_tokens > max_tokens and current:
+            segments.append(" ".join(current))
+            current = [sentence]
+            current_count = sent_tokens
+        else:
+            current.append(sentence)
+            current_count += sent_tokens
+
+    if current:
+        segments.append(" ".join(current))
+
+    return segments if segments else [text]
 
 
 def _smart_select(

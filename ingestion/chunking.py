@@ -339,7 +339,7 @@ def _make_chunk(
     parent_id: str | None = None,
     extra: dict | None = None,
 ) -> Chunk:
-    chunk_id = _stable_id(text + el_type)
+    chunk_id = _stable_id(text, el_type, reading_order)
     tok_count = _count_tokens(text)
     merged_meta = {**meta, **(extra or {})}
     return Chunk(
@@ -389,8 +389,9 @@ def _special_metadata(el: dict) -> dict:
     return {}
 
 
-def _stable_id(text: str) -> str:
-    return hashlib.md5(text.encode()).hexdigest()
+def _stable_id(text: str, el_type: str = "", reading_order: int = 0) -> str:
+    key = f"{text}|{el_type}|{reading_order}"
+    return hashlib.md5(key.encode()).hexdigest()
 
 
 def _count_tokens(text: str) -> int:

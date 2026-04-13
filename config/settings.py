@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     VECTOR_SEARCH_TOP_K: int = 30
     BM25_TOP_K: int = 30
     RERANK_TOP_K: int = 5
-    RELEVANCE_THRESHOLD: float = 0.10
+    RELEVANCE_THRESHOLD: float = 0.02
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # ── Chunking ──────────────────────────────────────────────────────────
