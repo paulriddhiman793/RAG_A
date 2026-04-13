@@ -243,7 +243,6 @@ def _maybe_answer_formula_query(query: str, chunks: list[dict[str, Any]]) -> str
             "raw": raw,
             "corrupted": corrupted,
             "vision_source": bool(meta.get("vision_source")),
-            "nougat_source": bool(meta.get("nougat_source")),
         })
 
     if not formula_entries:
@@ -277,7 +276,6 @@ def _maybe_answer_formula_query(query: str, chunks: list[dict[str, Any]]) -> str
                 int(e["corrupted"]),
                 -int(e.get("page", 10**6) if str(e.get("page", "")).isdigit() else 10**6),
                 -int(e.get("vision_source", False)),
-                -int(e.get("nougat_source", False)),
             ),
         )
         clean = [e for e in ranked if not e["corrupted"] and e["latex"]]
@@ -496,7 +494,7 @@ def _maybe_answer_figure_query(
     return None
 
 
-def _formula_relevance_score(query: str, entry: dict[str, Any]) -> tuple[int, int, int, int, int]:
+def _formula_relevance_score(query: str, entry: dict[str, Any]) -> tuple[int, int, int, int]:
     text = f"{entry.get('latex', '')} {entry.get('raw', '')}".lower()
     q = (query or "").lower()
 
@@ -516,9 +514,8 @@ def _formula_relevance_score(query: str, entry: dict[str, Any]) -> tuple[int, in
 
     clean_bonus = 1 if not entry.get("corrupted") else 0
     vision_bonus = 1 if entry.get("vision_source") else 0
-    nougat_bonus = 1 if entry.get("nougat_source") else 0
     page_rank = -int(entry.get("page", 10**6) if str(entry.get("page", "")).isdigit() else 10**6)
-    return (score, clean_bonus, vision_bonus, nougat_bonus, page_rank)
+    return (score, clean_bonus, vision_bonus, page_rank)
 
 
 _FIGURE_LABEL_RE = re.compile(r"\bfig(?:ure)?\.?\s*(\d+)\b", re.IGNORECASE)

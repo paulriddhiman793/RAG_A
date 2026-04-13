@@ -30,4 +30,23 @@ hf_cache/
 .DS_Store
 Thumbs.db
 a.txt
-docs
+
+# Project specific paths
+docs/
+agent_sessions/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build and Packaging
+build/
+dist/
+*.egg-info/

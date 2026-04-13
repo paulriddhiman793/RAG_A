@@ -150,6 +150,27 @@ class RAGSystem:
             direct_result["route_decision"] = decision.to_dict()
             return direct_result
 
+        if decision.mode == "chat":
+            chat_answer = self.llm.complete(
+                f"The user says: {question}\n\nRespond politely and concisely as a helpful AI assistant. Do not make up facts about documents.",
+                system="You are a helpful, conversational AI assistant.",
+                max_tokens=500
+            )
+            return {
+                "query": question,
+                "answer": chat_answer,
+                "is_grounded": False,
+                "no_answer": True,
+                "flagged_claims": ["Greeting / Chit-chat response"],
+                "sources_used": [],
+                "expanded_queries": [],
+                "top_score": 0.0,
+                "chunks_retrieved": 0,
+                "mode": "chat",
+                "route_reason": decision.reason,
+                "route_decision": decision.to_dict()
+            }
+
         if decision.mode == "agent":
             agent_result = self.agent.run(
                 question,

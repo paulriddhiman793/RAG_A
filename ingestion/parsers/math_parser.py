@@ -1,11 +1,7 @@
 """
 Math parser — converts Formula elements into dual representation:
-  1. LaTeX  — from Nougat (clean, accurate) or regex fallback
+  1. LaTeX  — from regex fallback
   2. Natural language — for embedding and semantic search
-
-Priority:
-  - If nougat_data is provided (from NougatProcessor), use its equations
-  - Otherwise fall back to regex extraction from Unstructured's text
 """
 from __future__ import annotations
 
@@ -19,12 +15,11 @@ from utils.logger import logger
 def parse_formula(
     element: dict[str, Any],
     llm_client=None,
-    nougat_equations: list[dict] | None = None,
 ) -> dict[str, Any]:
     raw_text = element.get("text", "")
     page = element.get("metadata", {}).get("page_number", 0)
 
-    latex, source = _get_latex(raw_text, page, nougat_equations)
+    latex, source = _get_latex(raw_text, page)
     vision_latex = _get_latex_from_vision(element, llm_client)
     if vision_latex and (_looks_corrupted_formula(latex, raw_text) or not latex):
         latex, source = vision_latex, "vision"
@@ -51,7 +46,6 @@ def parse_formula(
             "raw_formula_text": raw_text,
             "nl_description": nl,
             "variables": variables,
-            "nougat_source": source == "nougat",
             "vision_source": source == "vision",
         },
     }
@@ -60,22 +54,15 @@ def parse_formula(
 def parse_formula_batch(
     elements: list[dict[str, Any]],
     llm_client=None,
-    nougat_data: dict | None = None,
 ) -> list[dict[str, Any]]:
-    nougat_equations = (nougat_data or {}).get("equations", [])
     return [
-        parse_formula(el, llm_client, nougat_equations)
+        parse_formula(el, llm_client)
         for el in elements
         if el.get("type") == "Formula"
     ]
 
 
-def _get_latex(raw_text, page, nougat_equations):
-    if nougat_equations:
-        match = _match_nougat_equation(raw_text, page, nougat_equations)
-        if match:
-            logger.debug(f"Formula matched via Nougat: {match[:60]}")
-            return match, "nougat"
+def _get_latex(raw_text, page):
     latex = _extract_latex_regex(raw_text)
     return latex, "regex"
 
@@ -112,35 +99,6 @@ def _get_latex_from_vision(element: dict[str, Any], llm_client=None) -> str:
     if not response or response.upper() == "UNREADABLE":
         return ""
     return response
-
-
-def _match_nougat_equation(raw_text, page, nougat_equations):
-    candidates = [eq for eq in nougat_equations if abs(eq.get("page", 0) - page) <= 1]
-    if not candidates:
-        candidates = nougat_equations[:10]
-    if not candidates:
-        return ""
-
-    raw_clean = _clean_for_comparison(raw_text)
-
-    def score(eq):
-        latex_clean = _clean_for_comparison(eq.get("latex", ""))
-        if not latex_clean or not raw_clean:
-            return 0.0
-        raw_tri = set(_trigrams(raw_clean))
-        lat_tri = set(_trigrams(latex_clean))
-        if not raw_tri or not lat_tri:
-            return 0.0
-        intersection = len(raw_tri & lat_tri)
-        union = len(raw_tri | lat_tri)
-        boost = 1.2 if eq.get("display") else 1.0
-        return (intersection / union) * boost if union else 0.0
-
-    scored = [(score(eq), eq) for eq in candidates]
-    best_score, best_eq = max(scored, key=lambda x: x[0])
-    if best_score > 0.15:
-        return best_eq.get("latex", "")
-    return ""
 
 
 def _extract_latex_regex(text: str) -> str:

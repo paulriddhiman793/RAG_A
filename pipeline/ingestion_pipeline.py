@@ -19,10 +19,10 @@ from ingestion.parsers import (
     parse_formula_batch,
     parse_table_batch,
 )
-from ingestion.parsers.nougat_processor import extract_with_nougat, is_nougat_available
 from ingestion.versioning import get_deprecated_ids, stamp_chunks
 from utils.language_detector import detect_language
 from utils.logger import logger
+import concurrent.futures
 
 
 def ingest_document(
@@ -47,61 +47,35 @@ def ingest_document(
 
     elements = attach_captions(elements)
 
-    nougat_data: dict | None = None
-    if settings.USE_NOUGAT:
-        if is_nougat_available():
-            formula_pages = sorted(
-                {
-                    e.get("metadata", {}).get("page_number", 1)
-                    for e in elements
-                    if e.get("type") in ("Formula", "Table")
-                }
-            )
-            table_pages = sorted(
-                {
-                    e.get("metadata", {}).get("page_number", 1)
-                    for e in elements
-                    if e.get("type") == "Table"
-                }
-            )
-            target_pages = sorted(set(formula_pages + table_pages))
-
-            if target_pages:
-                logger.info(
-                    f"Nougat enabled - running on {len(target_pages)} pages "
-                    f"containing equations/tables: {target_pages}"
-                )
-                nougat_data = extract_with_nougat(path, pages=target_pages)
-            else:
-                logger.info("No Formula/Table elements found - skipping Nougat")
-
-            if nougat_data:
-                n_eq = len(nougat_data.get("equations", []))
-                n_tb = len(nougat_data.get("tables", []))
-                logger.info(f"Nougat extracted {n_eq} equations, {n_tb} tables")
-            elif target_pages:
-                logger.warning(
-                    "Nougat returned no data - using regex/HTML fallback parsers"
-                )
-        else:
-            logger.info(
-                "USE_NOUGAT=true but Nougat is not available - "
-                "using regex/HTML fallback parsers"
-            )
-    else:
-        logger.info("Nougat disabled - using regex + HTML parsers for math/tables")
-
     formula_els = [e for e in elements if e["type"] == "Formula"]
-    parsed_formulas = {
-        e["text"]: parse_formula_batch([e], llm_client, nougat_data)[0]
-        for e in formula_els
-    }
-
     table_els = [e for e in elements if e["type"] == "Table"]
-    parsed_tables = {
-        e.get("table_html", e["text"]): parse_table_batch([e], llm_client, nougat_data)[0]
-        for e in table_els
-    }
+    
+    parsed_formulas = {}
+    parsed_tables = {}
+    
+    # Process formulas and tables in parallel using up to 10 threads as per constraints
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        form_futures = {
+            executor.submit(lambda e=e: parse_formula_batch([e], llm_client)[0]): e 
+            for e in formula_els
+        }
+        for future in concurrent.futures.as_completed(form_futures):
+            e = form_futures[future]
+            try:
+                parsed_formulas[e["text"]] = future.result()
+            except Exception as exc:
+                logger.error(f"Formula parsing failed for {e['text'][:30]}: {exc}")
+
+        tab_futures = {
+            executor.submit(lambda e=e: parse_table_batch([e], llm_client)[0]): e 
+            for e in table_els
+        }
+        for future in concurrent.futures.as_completed(tab_futures):
+            e = tab_futures[future]
+            try:
+                parsed_tables[e.get("table_html", e["text"])] = future.result()
+            except Exception as exc:
+                logger.error(f"Table parsing failed: {exc}")
 
     image_els = [e for e in elements if e["type"] == "Image"]
     parsed_figures = parse_figure_batch(image_els, llm_client)
@@ -197,11 +171,17 @@ def ingest_documents(
 ) -> list[dict[str, Any]]:
     """Ingest multiple documents."""
     results = []
-    for fp in file_paths:
-        try:
-            result = ingest_document(fp, vector_store, bm25_index, llm_client, domain)
-            results.append(result)
-        except Exception as e:
-            logger.error(f"Failed to ingest {fp}: {e}")
-            results.append({"file": str(fp), "status": "error", "error": str(e)})
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_fp = {
+            executor.submit(ingest_document, fp, vector_store, bm25_index, llm_client, domain): fp 
+            for fp in file_paths
+        }
+        for future in concurrent.futures.as_completed(future_to_fp):
+            fp = future_to_fp[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Failed to ingest {fp}: {e}")
+                results.append({"file": str(fp), "status": "error", "error": str(e)})
     return results

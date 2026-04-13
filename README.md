@@ -246,7 +246,6 @@ RAG_A/
 |   `-- parsers/
 |       |-- figure_parser.py
 |       |-- math_parser.py
-|       |-- nougat_processor.py
 |       `-- table_parser.py
 |-- pipeline/
 |   |-- ingestion_pipeline.py
@@ -349,7 +348,6 @@ Formula extraction is handled separately from generic OCR.
 The current implementation supports:
 
 - regex-based extraction from formula-like text
-- optional Nougat support if enabled
 - a vision-based fallback for corrupted formulas when `USE_FORMULA_VISION_FALLBACK=true`
 - equation-specific prompting and answer logic
 - corruption detection so bad OCR is marked as corrupted instead of silently hallucinated into clean equations
@@ -750,7 +748,6 @@ DEFAULT_EMBEDDING_MODEL=intfloat/multilingual-e5-large
 CHROMA_PERSIST_DIR=./chroma_db
 COLLECTION_NAME=rag_collection
 RELEVANCE_THRESHOLD=0.10
-USE_NOUGAT=false
 USE_FORMULA_VISION_FALLBACK=true
 AUTO_ROUTE_QUERIES=true
 AGENT_MAX_STEPS=5
@@ -770,7 +767,6 @@ AGENT_MEMORY_DIR=./agent_sessions
 | `RERANK_TOP_K` | Final candidate count after reranking. |
 | `RELEVANCE_THRESHOLD` | Minimum top score before the system returns a no-answer response. |
 | `MAX_CONTEXT_TOKENS` | Prompt budget before compression is applied. |
-| `USE_NOUGAT` | Enables Nougat for formula/table extraction if available. |
 | `USE_FORMULA_VISION_FALLBACK` | Uses the vision model to rescue corrupted formula extraction. |
 | `RECENCY_DECAY_DAYS` | Controls recency bonus applied to newer ingestions. |
 | `AUTO_ROUTE_QUERIES` | Enables automatic direct-vs-agent routing in the standard `query` command. |

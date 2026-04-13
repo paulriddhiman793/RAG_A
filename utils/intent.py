@@ -97,3 +97,18 @@ def looks_table_like_image(chunk: dict[str, Any]) -> bool:
         str(meta.get("alt_text", "")),
         str(chunk.get("text", "")),
     )
+
+
+def has_greeting_intent(query: str) -> bool:
+    """Return True if the query is a generic greeting or chit-chat."""
+    q = (query or "").lower().strip()
+    greetings = {
+        "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+        "how are you", "who are you", "what's up", "whats up", "greetings"
+    }
+    # If the exact entire query is a greeting, or very short and starts with one
+    if q in greetings:
+        return True
+    if len(q.split()) <= 4 and any(q.startswith(g) for g in greetings):
+        return True
+    return False

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus RAG - Advanced Agentic Search</title>
+    <!-- Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="glow-bg">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    
+    <div class="app-container fade-in-up">
+        <!-- Sidebar -->
+        <aside class="sidebar glass-panel">
+            <div class="brand">
+                <div class="logo-box">
+                    <i class="ri-brain-line logo-icon"></i>
+                </div>
+                <h2>Nexus<span class="text-gradient">RAG</span></h2>
+            </div>
+            
+            <div class="section mt-6">
+                <h3 class="section-title">Knowledge Base</h3>
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-content">
+                        <i class="ri-file-upload-line upload-icon"></i>
+                        <p>Click or drag to ingest document</p>
+                    </div>
+                    <input type="file" id="fileInput" hidden>
+                    <!-- Progress bar -->
+                    <div class="upload-progress" id="uploadProgress">
+                        <div class="progress-bar"></div>
+                    </div>
+                </div>
+                <div id="uploadStatus" class="status-msg"></div>
+            </div>
+
+            <div class="section mt-6">
+                <h3 class="section-title">Query Strategy</h3>
+                <div class="custom-select-wrapper">
+                    <select id="modeSelect" class="glass-input">
+                        <option value="auto" selected>Auto-Route (Recommended)</option>
+                        <option value="direct">Direct RAG (Speed)</option>
+                        <option value="agent">Agentic Loop (Reasoning)</option>
+                    </select>
+                    <i class="ri-arrow-down-s-line select-icon"></i>
+                </div>
+            </div>
+
+            <div class="section mt-6" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-bottom: 1.5rem; min-height: 200px;">
+                <h3 class="section-title">Available Tools</h3>
+                <div id="toolsList" class="tools-list scrollable-area">
+                    <div class="stat-skeleton" style="height: 40px; margin-bottom: 8px;"></div>
+                    <div class="stat-skeleton" style="height: 40px; margin-bottom: 8px;"></div>
+                    <div class="stat-skeleton" style="height: 40px;"></div>
+                </div>
+            </div>
+
+            <div class="section mt-auto">
+                <h3 class="section-title">System Intelligence</h3>
+                <div class="stats-grid" id="statsGrid">
+                    <div class="stat-skeleton"></div>
+                    <div class="stat-skeleton"></div>
+                    <div class="stat-skeleton" style="grid-column: span 2;"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-container glass-panel">
+            <header class="chat-header">
+                <div>
+                    <h1 class="chat-title">Research Assistant</h1>
+                    <p class="chat-subtitle">Ask complex questions. Let the agent do the heavy lifting.</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="icon-btn" id="manualBtn" title="NexusRAG Manual">
+                        <i class="ri-book-3-line"></i>
+                    </button>
+                    <button class="icon-btn" title="Clear Chat" onclick="clearChat()">
+                        <i class="ri-delete-bin-line"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div class="chat-body" id="chatBox">
+                <!-- Welcome Message -->
+                <div class="message assistant slide-in-bottom">
+                    <div class="avatar"><i class="ri-robot-2-line"></i></div>
+                    <div class="msg-bubble">
+                        <div class="msg-content markdown-body">
+                            <p>Greetings! I am Nexus RAG. Upload your documents on the left and ask me anything. I can dynamically route between direct retrieval and complex reasoning agent loops.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="chat-footer">
+                <form id="chatForm" class="input-form">
+                    <div class="input-wrapper glass-input-wrap">
+                        <textarea id="questionInput" placeholder="Ask a question... (e.g., What are the key findings?)" rows="1"></textarea>
+                        <button type="submit" class="send-btn" id="sendBtn">
+                            <i class="ri-send-plane-fill"></i>
+                        </button>
+                    </div>
+                </form>
+            </footer>
+        </main>
+
+        <!-- Manual Sidebar -->
+        <aside class="manual-panel glass-panel" id="manualPanel">
+            <header class="manual-header">
+                <h3 class="chat-title"><i class="ri-book-3-line text-gradient"></i> NexusRAG Manual</h3>
+                <button class="icon-btn" id="closeManualBtn" title="Close"><i class="ri-close-line"></i></button>
+            </header>
+            <div class="manual-body scrollable-area markdown-body">
+                <h4>Getting Started</h4>
+                <p>To begin, click or drag a document into the <strong>Knowledge Base</strong> zone on the left. Once indexed, type your question in the chat and hit send.</p>
+                
+                <h4 style="margin-top: 1.5rem;">Beyond Basic RAG</h4>
+                <p>A basic RAG system operates like "Ctrl+F with embeddings"—it flattens your document into plain text and blind-searches it.</p><br>
+                <p><strong>NexusRAG</strong> is a multimodal, citation-grounded architecture that does much more:</p>
+                <ul>
+                    <li><strong>Typed Extraction:</strong> It doesn't flatten files. It preserves Figures, Tables, and Math Formulas as distinct structural elements.</li>
+                    <li><strong>Vision Routing:</strong> For figure questions, it uses Llama Vision models to physically "look" at the charts.</li>
+                    <li><strong>Hybrid Indexing:</strong> Combines Vector semantic search with BM25 exact-keyword matching and cross-encoder Reranking.</li>
+                    <li><strong>Hierarchical Context:</strong> Searches tiny optimized chunks, but feeds large "Parent Chunks" to the AI so nothing is taken out of context.</li>
+                    <li><strong>Hallucination Guard:</strong> Runs an NLI-check to mathematically guarantee that all cited claims are grounded in document facts.</li>
+                    <li><strong>Agentic Reasoning Loop:</strong> Instead of blindly searching once, the Agent "thinks", runs queries, reads tables, compares data, and searches again until the task is complete.</li>
+                </ul>
+
+                <h4 style="margin-top: 1.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.5rem;">Performance Trade-offs</h4>
+                <p style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted)">Why does NexusRAG take more time than standard implementations?</p>
+                <div class="source-item" style="margin-top: 1rem;">
+                    <h4 style="color: var(--primary);">Ingestion Constraints</h4>
+                    <p>Instead of cheap split-by-word-count chunking, NexusRAG invokes advanced <i>Unstructured</i> parsing and Vision ML models. It decomposes the visual layout, performs optical character recognition on messy math formulas, extracts raw HTML tables, and builds dual Parent-Child Vector/BM25 indices. This is heavy upfront compute yielding extreme analytic power.</p>
+                </div>
+                <div class="source-item" style="margin-top: 1rem;">
+                    <h4 style="color: var(--warning);">Retrieval & Synthesis Constraints</h4>
+                    <p>Standard RAG takes 1-2 seconds because it simply dumps a chunk of text to the LLM. Because NexusRAG orchestrates <strong>Hybrid Retrieval + Reranking + Agent Loops</strong>, you are waiting for the AI to *actively research* locally. Running query expansions, bouncing between tools, and invoking Vision/NLI models takes longer but produces vastly more accurate, robust, and verified answers.</p>
+                </div>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- Modals for Sources/Trace -->
+    <div id="detailsModal" class="modal">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3 id="modalTitle">Details</h3>
+                <button class="close-btn" id="closeModal"><i class="ri-close-line"></i></button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

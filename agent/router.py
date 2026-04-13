@@ -41,6 +41,15 @@ class QueryRouter:
                 complexity="complex",
             )
 
+        if self._has_greeting_intent(lowered):
+            return RouteDecision(
+                mode="chat",
+                reason="generic greeting or chit-chat detected",
+                suggested_tool="chat",
+                suggested_input={"question": q},
+                complexity="trivial",
+            )
+
         if suggested_tool in {
             "summarize_document",
             "explain_figure",
@@ -130,6 +139,10 @@ class QueryRouter:
         return any(term in lowered for term in [
             "compare", "difference", "different", "same", "vs", "versus",
         ])
+
+    @staticmethod
+    def _has_greeting_intent(lowered: str) -> bool:
+        return _intent.has_greeting_intent(lowered)
 
     @staticmethod
     def _has_summary_intent(lowered: str) -> bool:

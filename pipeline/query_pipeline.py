@@ -142,17 +142,27 @@ def query(
                 retrieved_chunks, vector_store, top_score
             )
         if not retrieved_chunks:
-            logger.info(f"No relevant content found (score={top_score:.3f})")
+            logger.info(f"No relevant content found (score={top_score:.3f}). Falling back to general LLM response.")
+            general_prompt = (
+                f"You are a helpful assistant. The user asked: {user_query}\n\n"
+                "Please answer this question using your general knowledge, as no specific provided documents contain the info."
+            )
+            try:
+                general_answer = llm_client.complete(
+                    general_prompt,
+                    system="You are a helpful, general-purpose AI assistant.",
+                    max_tokens=2000
+                ).strip()
+            except Exception as e:
+                general_answer = "I'm sorry, I could not process this general query."
+                logger.error(f"General fallback generation failed: {e}")
+
             return {
                 "query": user_query,
-                "answer": (
-                    "I cannot find relevant information about this in the "
-                    "provided documents. The query may be outside the scope "
-                    "of the indexed content."
-                ),
-                "is_grounded": True,
+                "answer": general_answer,
+                "is_grounded": False,
                 "no_answer": True,
-                "flagged_claims": [],
+                "flagged_claims": ["Answered using general knowledge"],
                 "sources_used": [],
                 "expanded_queries": all_queries,
                 "top_score": top_score,

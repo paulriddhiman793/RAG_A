@@ -6,9 +6,6 @@ Table parser — converts Unstructured Table elements into:
 
 The NL summary is what gets embedded.
 The full JSON table is what gets sent to the LLM.
-
-Nougat integration: if nougat_data is provided and has a table on the
-same page, we use its cleaner Markdown-based extraction.
 """
 from __future__ import annotations
 
@@ -25,15 +22,13 @@ from utils.logger import logger
 def parse_table(
     element: dict[str, Any],
     llm_client=None,
-    nougat_tables: list[dict] | None = None,
 ) -> dict[str, Any]:
     """
     Enrich a Table element with structured data and a searchable summary.
     """
     page = element.get("metadata", {}).get("page_number", 0)
 
-    # Try Nougat table first (cleaner parsing)
-    table_json, source = _get_table_json(element, page, nougat_tables)
+    table_json, source = _get_table_json(element)
     caption = _find_caption(element, table_json)
     df = _json_to_dataframe(table_json)
 
@@ -64,11 +59,9 @@ def parse_table(
 def parse_table_batch(
     elements: list[dict[str, Any]],
     llm_client=None,
-    nougat_data: dict | None = None,
 ) -> list[dict[str, Any]]:
-    nougat_tables = (nougat_data or {}).get("tables", [])
     return [
-        parse_table(el, llm_client, nougat_tables)
+        parse_table(el, llm_client)
         for el in elements
         if el.get("type") == "Table"
     ]
@@ -99,27 +92,10 @@ def query_dataframe(df: pd.DataFrame, question: str, llm_client=None) -> str:
 
 def _get_table_json(
     element: dict,
-    page: int,
-    nougat_tables: list[dict] | None,
 ) -> tuple[dict, str]:
-    """Try Nougat table first, fall back to HTML parsing."""
-    if nougat_tables:
-        match = _match_nougat_table(element, page, nougat_tables)
-        if match:
-            logger.debug(f"Table matched via Nougat on page {page}")
-            return match, "nougat"
-
+    """Fall back to HTML parsing."""
     html = element.get("table_html") or element.get("text", "")
     return _html_to_json(html), "html"
-
-
-def _match_nougat_table(element: dict, page: int, nougat_tables: list[dict]) -> dict | None:
-    """Match a Nougat table to this element by page proximity."""
-    candidates = [t for t in nougat_tables if abs(t.get("page", 0) - page) <= 1]
-    if not candidates:
-        return None
-    # Use the first match on the same page
-    return candidates[0].get("json")
 
 
 def _html_to_json(html: str) -> dict:

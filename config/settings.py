@@ -26,7 +26,6 @@ class Settings(BaseSettings):
     # ── Embedding Model ───────────────────────────────────────────────────
     DEFAULT_EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
     AUTO_DETECT_EMBEDDING_DOMAIN: bool = False
-    USE_NOUGAT: bool = False
     USE_FORMULA_VISION_FALLBACK: bool = True
 
     # ── Retrieval ─────────────────────────────────────────────────────────
